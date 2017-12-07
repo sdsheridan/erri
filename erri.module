@@ -1,0 +1,203 @@
+<?php
+/**
+ * @file
+ * Module main file
+ */
+
+/**
+ * Implements hook_form_alter().  Determine if there are child entities, and act accordingly.
+ */
+function erri_form_alter(&$form, &$form_state, $form_id) {
+  // Get a list of all delete forms via hook_erri_info().
+  static $delete_forms = array();
+  if ( empty($delete_forms) ) {
+    module_load_include('inc', 'erri');
+    $hooks = module_implements('erri_info');
+    foreach ( $hooks as $hook ) {
+      $function = $hook . '_erri_info';
+      if ( function_exists($function) ) {
+        $result = $function();
+        if ( is_array($result) ) {
+          $delete_forms += $result;
+        }
+      }
+    }
+  }
+
+  // If the current form is a delete form...
+  if ( !empty($delete_forms[$form_id]) ) {
+    $delete_form = &$delete_forms[$form_id];
+    // ...and this is the delete version of the form for forms that serve multiple purposes...
+    if ( empty($delete_form['is_delete_form']) || !empty($delete_form['is_delete_form']) &&
+            function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form) ) {
+      // If 'entity' is specified in the delete from, then this is a single instance delete form.
+      if ( !empty($delete_form['entity']) && function_exists($delete_form['entity']) ) {
+        // Retrieve the entity being deleted from the form.
+        $entity = $delete_form['entity']($form);
+        // Get the entity's ID.
+        $id = $entity->{$delete_form['entity_id']};
+        $child_entities = erri_get_child_entities($delete_form['target_type'], $id,
+                !empty($delete_form['bundles']), !empty($entity->type) ? $entity->type : NULL);
+        $title = $entity->{$delete_form['name_field']};
+      }
+      // If 'entities' is specified, then this is a multi-entity delete form
+      elseif ( !empty($delete_form['entities']) && function_exists($delete_form['entities']) ) {
+        $child_entities = array();
+        // Get the entities from the form.
+        $entities = $delete_form['entities']($form);
+        foreach ( element_children($entities) as $id ) {
+          // Get the full entity via the entity's load function.
+          $entity = $delete_form['entity_load_function']($id);
+          // Group index is used as a title for a section.
+          $group_index = $entity->{$delete_form['name_field']} . ( !empty($delete_form['use_id_in_name']) ? " ($id)" : '' );
+          $child_entities[$group_index] = erri_get_child_entities($delete_form['target_type'], $id,
+                  !empty($delete_form['bundles']), !empty($entity->type) ? $entity->type : NULL);
+          if ( empty($child_entities[$group_index]) ) {
+            unset($child_entities[$group_index]);
+          }
+        }
+        $title = $delete_form['type_name'];
+      }
+
+      if ( !empty($child_entities) ) {
+        $list = array();
+        $single_item = TRUE;
+        foreach ( $child_entities as $entity => $child ) {
+          if ( is_array($child) ) {
+            $sub_list = array();
+            $single_item = FALSE;
+            foreach ( $child as $item ) {
+              $sub_list[] = erri_get_reference($item);
+            }
+            $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
+          }
+          else {
+            $list[] = erri_get_reference($child);
+          }
+        }
+
+        if ( $single_item ) {
+          drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
+          $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
+                  array('%title' => $title));
+        }
+        else {
+          drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
+          $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
+                  array('@title' => $title));
+        }
+        $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul></div>';
+        $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
+        $form['actions']['submit']['#disabled'] = TRUE;
+      }
+    }
+  }
+}
+
+/**
+ * Assemble all child entities of a parent entity for referential integrity check.
+ * @param string $parent_entity_type The entity_type of the parent entity (eg., 'node', 'user', 'taxonomy_term', etc.).
+ * @param int $id The ID of the parent entity.
+ * @param bool $parent_entity_type_has_bundles True if the entity type of the parent entity has bundles (such as is the case with nodes).
+ * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
+ * @return array Child entities referring to the parent, or an empty array if no entities refer to the parent.
+ */
+function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_has_bundles = FALSE, $bundle = '') {
+  $child_entities = array();
+  $entityreference_fields = erri_get_entityreference_fields();
+  if ( $parent_entity_type == 'taxonomy_term' ) {
+    $entityreference_fields += erri_get_taxonomy_term_reference_fields();
+  }
+  foreach ( $entityreference_fields as $field ) {
+    if ( $field->data['settings']['target_type'] == $parent_entity_type && (
+            // ...and either the form isn't for an entity type that uses bundles, or...
+            !$parent_entity_type_has_bundles ||
+            // ...the entity type (bundle) is one of the field's target bundles...
+            in_array($bundle, $field->data['settings']['handler_settings']['target_bundles']) ) &&
+            // ...and the field is actually being used to store data...
+            !empty($field->data['storage']['details']['sql']['FIELD_LOAD_CURRENT']) ) {
+      foreach ( $field->data['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
+        $column_name = current($column);
+        // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
+        // so that array arithmatic doesn't stomp on array elements.
+        $child_entities += db_query("SELECT *, CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk FROM {{$table}} "
+        . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
+      }
+    }
+  }
+  return $child_entities;
+}
+
+/**
+ * Helper function to get all entityreference fields.
+ * @staticvar array $fields The entityreference fields.
+ * @return array Array of objects representing the entityreference field data, keyed on field name.
+ */
+function erri_get_entityreference_fields() {
+  static $fields = array();
+  if ( empty($fields) ) {
+    $fields = db_query("SELECT * FROM {field_config} "
+              . "WHERE type = 'entityreference' AND active = 1 and deleted = 0")->fetchAllAssoc('field_name');
+    foreach ( $fields as &$field ) {
+      $field->data = unserialize($field->data);
+    }
+  }
+  return $fields;
+}
+
+/**
+ * Helper function to get all taxonomy term reference fields.
+ * @staticvar array $fields The taxonomy term reference fields.
+ * @return array Array of objects representing the taxonomy term reference field data, keyed on field name.
+ */
+function erri_get_taxonomy_term_reference_fields() {
+  static $fields = array();
+  if ( empty($fields) ) {
+    $fields = db_query("SELECT * FROM {field_config} "
+              . "WHERE type = 'taxonomy_term_reference' AND active = 1 and deleted = 0")->fetchAllAssoc('field_name');
+    foreach ( $fields as &$field ) {
+      $field->data = unserialize($field->data);
+      $field->data['settings']['target_type'] = 'taxonomy_term'; // Do this for consistency in how all fields will be processed.
+    }
+  }
+  return $fields;
+}
+
+/**
+ * Helper function to specify the wording and link around a reference.
+ * @param object $child The child entity with the reference.
+ * @return string The referencing message.
+ */
+function erri_get_reference($child) {
+  switch ( $child->entity_type ) {
+    case 'node':
+      $child_node = node_load($child->entity_id);
+      if ( node_access('view', $child_node) ) {
+        $reference = strtolower(node_type_get_name($child_node)) . ' ' . l($child_node->title, 'node/'.$child->entity_id);
+      }
+      else {
+        $reference = t('a content item');
+      }
+      break;
+    case 'user':
+      if ( user_access('access user profiles') ) {
+        $child_node = user_load($child->entity_id);
+        $reference = t('person') . ' ' . l($child_node->name, 'user/'.$child->entity_id);
+      }
+      else {
+        $reference = t('a person');
+      }
+      break;
+    case 'taxonomy_term' :
+      $term = taxonomy_term_load($child->entity_id);
+      $reference = t('taxonomy term %term', array('%term' => $term->name));
+      break;
+    default:
+      $reference = t('!article %type', array(
+        '!article' => in_array($child->entity_type[0], array('a', 'e', 'i', 'o', 'u')) ? t('an') : t('a'),
+        '%type' => $child->entity_type,
+      ));
+      break;
+  }
+  return $reference;
+}

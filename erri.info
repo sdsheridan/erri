@@ -1,0 +1,5 @@
+name = Entity Reference Referrential Integrity
+description = Insure referrential integrity for entity reference and taxonomy term reference fields.
+package = Fields
+core = "7.x"
+project = "erri"
