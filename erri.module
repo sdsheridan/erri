@@ -32,6 +32,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form) ) {
       // If 'entity' is specified in the delete from, then this is a single instance delete form.
       if ( !empty($delete_form['entity']) && function_exists($delete_form['entity']) ) {
+        $single_item = TRUE;
         // Retrieve the entity being deleted from the form.
         $entity = $delete_form['entity']($form);
         // Get the entity's ID.
@@ -42,6 +43,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       }
       // If 'entities' is specified, then this is a multi-entity delete form
       elseif ( !empty($delete_form['entities']) && function_exists($delete_form['entities']) ) {
+        $single_item = FALSE;
         $child_entities = array();
         // Get the entities from the form.
         $entities = $delete_form['entities']($form);
@@ -60,19 +62,14 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       }
 
       if ( !empty($child_entities) ) {
-        $list = array();
-        $single_item = TRUE;
-        foreach ( $child_entities as $entity => $child ) {
-          if ( is_array($child) ) {
-            $sub_list = array();
-            $single_item = FALSE;
-            foreach ( $child as $item ) {
-              $sub_list[] = erri_get_reference($item);
-            }
+        if ( $single_item ) {
+          $list = _erri_list_children($child_entities);
+        }
+        else {
+          $list = array();
+          foreach ( $child_entities as $entity => $children ) {
+            $sub_list = _erri_list_children($children);
             $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
-          }
-          else {
-            $list[] = erri_get_reference($child);
           }
         }
 
@@ -100,28 +97,36 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
  * @param int $id The ID of the parent entity.
  * @param bool $parent_entity_type_has_bundles True if the entity type of the parent entity has bundles (such as is the case with nodes).
  * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
- * @return array Child entities referring to the parent, or an empty array if no entities refer to the parent.
+ * @return array Child entities referring to the parent, keyed on the referencing field with sub-arrays of the
+ *   entities referencing, or an empty array if no entities refer to the parent.
  */
 function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_has_bundles = FALSE, $bundle = '') {
   $child_entities = array();
-  $entityreference_fields = erri_get_entityreference_fields();
+  $reference_fields = field_read_fields(array('type' => 'entityreference'));
   if ( $parent_entity_type == 'taxonomy_term' ) {
-    $entityreference_fields += erri_get_taxonomy_term_reference_fields();
+    $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
   }
-  foreach ( $entityreference_fields as $field ) {
-    if ( $field->data['settings']['target_type'] == $parent_entity_type && (
+  foreach ( $reference_fields as $field ) {
+    // If it's an entityreference referring to the right entity type, or...
+    if ( ( $field['type'] == 'entityreference' && $field['settings']['target_type'] == $parent_entity_type  ||
+            // ...it's a taxonomy term reference and we're testing against a taxonomy term, and...
+            $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
+            // ...the field is in fact being used, and...
+            !empty($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) && (
             // ...and either the form isn't for an entity type that uses bundles, or...
             !$parent_entity_type_has_bundles ||
             // ...the entity type (bundle) is one of the field's target bundles...
-            in_array($bundle, $field->data['settings']['handler_settings']['target_bundles']) ) &&
-            // ...and the field is actually being used to store data...
-            !empty($field->data['storage']['details']['sql']['FIELD_LOAD_CURRENT']) ) {
-      foreach ( $field->data['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
+            in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) {
+      $child_entities[$field['field_name']] = array();
+      foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
         $column_name = current($column);
         // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
         // so that array arithmatic doesn't stomp on array elements.
-        $child_entities += db_query("SELECT *, CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk FROM {{$table}} "
+        $child_entities[$field['field_name']] += db_query("SELECT *, CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk FROM {{$table}} "
         . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
+      }
+      if ( empty($child_entities[$field['field_name']]) ) {
+        unset($child_entities[$field['field_name']]);
       }
     }
   }
@@ -129,38 +134,17 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
 }
 
 /**
- * Helper function to get all entityreference fields.
- * @staticvar array $fields The entityreference fields.
- * @return array Array of objects representing the entityreference field data, keyed on field name.
+ * Helper function to arrange child entities in an array of strings.
+ * @param array $child_entities An array of child entities to be listed.
+ * @return array The list of strings.
  */
-function erri_get_entityreference_fields() {
-  static $fields = array();
-  if ( empty($fields) ) {
-    $fields = db_query("SELECT * FROM {field_config} "
-              . "WHERE type = 'entityreference' AND active = 1 and deleted = 0")->fetchAllAssoc('field_name');
-    foreach ( $fields as &$field ) {
-      $field->data = unserialize($field->data);
+function _erri_list_children($child_entities) {
+  foreach ( $child_entities as $field_name => $children ) {
+    foreach ( $children as $child ) {
+      $list[] = _erri_get_reference($child, $field_name);
     }
   }
-  return $fields;
-}
-
-/**
- * Helper function to get all taxonomy term reference fields.
- * @staticvar array $fields The taxonomy term reference fields.
- * @return array Array of objects representing the taxonomy term reference field data, keyed on field name.
- */
-function erri_get_taxonomy_term_reference_fields() {
-  static $fields = array();
-  if ( empty($fields) ) {
-    $fields = db_query("SELECT * FROM {field_config} "
-              . "WHERE type = 'taxonomy_term_reference' AND active = 1 and deleted = 0")->fetchAllAssoc('field_name');
-    foreach ( $fields as &$field ) {
-      $field->data = unserialize($field->data);
-      $field->data['settings']['target_type'] = 'taxonomy_term'; // Do this for consistency in how all fields will be processed.
-    }
-  }
-  return $fields;
+  return $list;
 }
 
 /**
@@ -168,29 +152,49 @@ function erri_get_taxonomy_term_reference_fields() {
  * @param object $child The child entity with the reference.
  * @return string The referencing message.
  */
-function erri_get_reference($child) {
+function _erri_get_reference($child, $field_name) {
+  if ( !entity_access('view', $child->entity_type) ) {
+    return t('something else on the site');
+  }
   switch ( $child->entity_type ) {
-    case 'node':
-      $child_node = node_load($child->entity_id);
-      if ( node_access('view', $child_node) ) {
-        $reference = strtolower(node_type_get_name($child_node)) . ' ' . l($child_node->title, 'node/'.$child->entity_id);
-      }
-      else {
-        $reference = t('a content item');
+    case 'node' :
+      $reference = t('a content item');
+      $child_entity = node_load($child->entity_id);
+      if ( entity_access('view', $child->entity_type, $child_entity) ) {
+        $field = field_info_field($field_name);
+        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
+          $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
+          $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' '
+                  . strtolower(node_type_get_name($child_entity)) .
+                  ' ' . l($child_entity->title, 'node/'.$child->entity_id);
+        }
       }
       break;
     case 'user':
+      $reference = t('a person');
       if ( user_access('access user profiles') ) {
-        $child_node = user_load($child->entity_id);
-        $reference = t('person') . ' ' . l($child_node->name, 'user/'.$child->entity_id);
-      }
-      else {
-        $reference = t('a person');
+        $child_entity = user_load($child->entity_id);
+        if ( entity_access('view', $child->entity_type, $child_entity) ) {
+          $field = field_info_field($field_name);
+          if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
+            $field_instance = field_info_instance('user', $field_name, 'user');
+            $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' ' .
+                    t('person') . ' ' . l($child_entity->name, 'user/'.$child->entity_id);
+          }
+        }
       }
       break;
     case 'taxonomy_term' :
-      $term = taxonomy_term_load($child->entity_id);
-      $reference = t('taxonomy term %term', array('%term' => $term->name));
+      $reference = t('a taxonomy term');
+      $child_entity = taxonomy_term_load($child->entity_id);
+      if ( entity_access('view', $child->entity_type, $child_entity) ) {
+        $field = field_info_field($field_name);
+        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
+          $field_instance = field_info_instance('taxonomy_term', $field_name, 'taxonomy_term');
+          $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' ' .
+                  t('taxonomy term %term', array('%term' => $child_entity->name));
+        }
+      }
       break;
     default:
       $reference = t('!article %type', array(
