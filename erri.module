@@ -26,15 +26,22 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
 
   // If the current form is a delete form...
   if ( !empty($delete_forms[$form_id]) ) {
-    $delete_form = &$delete_forms[$form_id];
+    $delete_form = &$delete_forms[$form_id] + array(
+      'entity_id' => 'id',
+      'target_type' => NULL,
+      'bundles' => FALSE,
+      'name_field' => 'name',
+      'entity_load_function' => 'entity_load',
+    );
+    $form_copy = $form; // Keep the original form array 'safe'.
     // ...and this is the delete version of the form for forms that serve multiple purposes...
     if ( empty($delete_form['is_delete_form']) || !empty($delete_form['is_delete_form']) &&
-            function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form) ) {
+            function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form_copy) ) {
       // If 'entity' is specified in the delete from, then this is a single instance delete form.
       if ( !empty($delete_form['entity']) && function_exists($delete_form['entity']) ) {
         $single_item = TRUE;
         // Retrieve the entity being deleted from the form.
-        $entity = $delete_form['entity']($form);
+        $entity = $delete_form['entity']($form_copy);
         // Get the entity's ID.
         $id = $entity->{$delete_form['entity_id']};
         $child_entities = erri_get_child_entities($delete_form['target_type'], $id,
@@ -46,7 +53,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $single_item = FALSE;
         $child_entities = array();
         // Get the entities from the form.
-        $entities = $delete_form['entities']($form);
+        $entities = $delete_form['entities']($form_copy);
         foreach ( element_children($entities) as $id ) {
           // Get the full entity via the entity's load function.
           $entity = $delete_form['entity_load_function']($id);
