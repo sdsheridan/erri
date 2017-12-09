@@ -69,13 +69,14 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       }
 
       if ( !empty($child_entities) ) {
+        $has_required = FALSE;
         if ( $single_item ) {
-          $list = _erri_list_children($child_entities);
+          $list = _erri_list_children($child_entities, $has_required);
         }
         else {
           $list = array();
           foreach ( $child_entities as $entity => $children ) {
-            $sub_list = _erri_list_children($children);
+            $sub_list = _erri_list_children($children, $has_required);
             $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
         }
@@ -90,7 +91,13 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
                   array('@title' => $title));
         }
-        $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul></div>';
+        $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul>';
+        if ( $has_required ) {
+          $form['description']['#markup'] .= '<p><span class="form-required" title="' .
+                  t('This field is required.') . '">*</span> ' .
+                  t('Required field - cannot be left blank.') . '</p>';
+        }
+        $form['description']['#markup'] .= '</div>';
         $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
         $form['actions']['submit']['#disabled'] = TRUE;
       }
@@ -143,12 +150,14 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
 /**
  * Helper function to arrange child entities in an array of strings.
  * @param array $child_entities An array of child entities to be listed.
+ * @param bool $has_required Passed by reference, a flag indicating if any of the
+ *   listed fields are required fields.
  * @return array The list of strings.
  */
-function _erri_list_children($child_entities) {
+function _erri_list_children($child_entities, &$has_required) {
   foreach ( $child_entities as $field_name => $children ) {
     foreach ( $children as $child ) {
-      $list[] = _erri_get_reference($child, $field_name);
+      $list[] = _erri_get_reference($child, $field_name, $has_required);
     }
   }
   return $list;
@@ -157,9 +166,13 @@ function _erri_list_children($child_entities) {
 /**
  * Helper function to specify the wording and link around a reference.
  * @param object $child The child entity with the reference.
+ * @param string $field_name The machine name of the field referencing the child.
+ * @param bool $has_required Passed by reference, a flag indicating if any of the
+ *   previous listed fields are required fields, and set to TRUE if this field's
+ *   instance is required.
  * @return string The referencing message.
  */
-function _erri_get_reference($child, $field_name) {
+function _erri_get_reference($child, $field_name, &$has_required) {
   if ( !entity_access('view', $child->entity_type) ) {
     return t('something else on the site');
   }
@@ -171,8 +184,10 @@ function _erri_get_reference($child, $field_name) {
         $field = field_info_field($field_name);
         if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
           $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
-          $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' '
-                  . strtolower(node_type_get_name($child_entity)) .
+          $has_required |= $field_instance['required'];
+          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+          $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
+                  strtolower(node_type_get_name($child_entity)) .
                   ' ' . l($child_entity->title, 'node/'.$child->entity_id);
         }
       }
@@ -185,7 +200,9 @@ function _erri_get_reference($child, $field_name) {
           $field = field_info_field($field_name);
           if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
             $field_instance = field_info_instance('user', $field_name, 'user');
-            $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' ' .
+            $has_required |= $field_instance['required'];
+            $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+            $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
                     t('person') . ' ' . l($child_entity->name, 'user/'.$child->entity_id);
           }
         }
@@ -198,7 +215,9 @@ function _erri_get_reference($child, $field_name) {
         $field = field_info_field($field_name);
         if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
           $field_instance = field_info_instance('taxonomy_term', $field_name, 'taxonomy_term');
-          $reference = t('field %field in', array('%field' => $field_instance['label'])) . ' ' .
+          $has_required |= $field_instance['required'];
+          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+          $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
                   t('taxonomy term %term', array('%term' => $child_entity->name));
         }
       }
