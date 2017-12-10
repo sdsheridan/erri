@@ -46,6 +46,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $id = $entity->{$delete_form['entity_id']};
         $child_entities = erri_get_child_entities($delete_form['target_type'], $id,
                 !empty($delete_form['bundles']), !empty($entity->type) ? $entity->type : NULL);
+        $field_names = array($id => array_keys($child_entities));
         $title = $entity->{$delete_form['name_field']};
       }
       // If 'entities' is specified, then this is a multi-entity delete form
@@ -54,7 +55,9 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $child_entities = array();
         // Get the entities from the form.
         $entities = $delete_form['entities']($form_copy);
-        foreach ( element_children($entities) as $id ) {
+        $entity_ids = element_children($entities);
+        $field_names = array();
+        foreach ( $entity_ids as $id ) {
           // Get the full entity via the entity's load function.
           $entity = $delete_form['entity_load_function']($id);
           // Group index is used as a title for a section.
@@ -64,6 +67,9 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           if ( empty($child_entities[$group_index]) ) {
             unset($child_entities[$group_index]);
           }
+          else {
+            $field_names[$id] = array_keys($child_entities[$group_index]);
+          }
         }
         $title = $delete_form['type_name'];
       }
@@ -72,6 +78,15 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $has_required = FALSE;
         if ( $single_item ) {
           $list = _erri_list_children($child_entities, $has_required);
+          if ( $has_required ) {
+            drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
+            $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
+                    array('%title' => $title));
+          }
+          else {
+            $form['description']['#markup'] .= '<div class="erri">' . t('%title cannot be deleted without emptying:',
+                    array('%title' => $title));
+          }
         }
         else {
           $list = array();
@@ -79,27 +94,31 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             $sub_list = _erri_list_children($children, $has_required);
             $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
+          if ( $has_required ) {
+            drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
+            $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
+                    array('@title' => $title));
+          }
+          else {
+            $form['description']['#markup'] .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emtpying referring fields:',
+                    array('@title' => $title));
+          }
         }
 
-        if ( $single_item ) {
-          drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
-          $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
-                  array('%title' => $title));
-        }
-        else {
-          drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
-          $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
-                  array('@title' => $title));
-        }
         $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul>';
         if ( $has_required ) {
           $form['description']['#markup'] .= '<p><span class="form-required" title="' .
                   t('This field is required.') . '">*</span> ' .
                   t('Required field - cannot be left blank.') . '</p>';
+          $form['actions']['submit']['#disabled'] = TRUE;
+        }
+        else {
+          $form['actions']['submit']['#value'] .= ' ' . t('and empty referring fields');
+          $form['erri_entities_and_field_names'] = array('#type' => 'value', '#value' => $field_names);
+          $form['#submit'][] = 'erri_delete_form_submit';
         }
         $form['description']['#markup'] .= '</div>';
         $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
-        $form['actions']['submit']['#disabled'] = TRUE;
       }
     }
   }
@@ -230,4 +249,23 @@ function _erri_get_reference($child, $field_name, &$has_required) {
       break;
   }
   return $reference;
+}
+
+/**
+ * Additional submit handler to set null target IDs when the referring fields do
+ * not require a value, and the user has decided to delete the referred-to entity
+ * anyway.
+ * @param array $form The form render array.
+ * @param array $form_state The state of the form.
+ */
+function erri_delete_form_submit($form, &$form_state) {
+  $entities_and_field_names = $form_state['values']['erri_entities_and_field_names'];
+  foreach ( $entities_and_field_names as $entity_id => $field_name ) {
+    $field = field_info_field($field_name);
+    foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
+      $column_name = current($column);
+      db_delete($table)->condition($column_name, $entity_id)->execute();
+    }
+  }
+  drupal_flush_all_caches();
 }
