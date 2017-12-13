@@ -192,60 +192,88 @@ function _erri_list_children($child_entities, &$has_required) {
  * @return string The referencing message.
  */
 function _erri_get_reference($child, $field_name, &$has_required) {
-  if ( !entity_access('view', $child->entity_type) ) {
-    return t('something else on the site');
-  }
   switch ( $child->entity_type ) {
     case 'node' :
-      $reference = t('a content item');
+      $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
+      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+      $reference = t('a field!required in a content item', array('!required' => $required));
+      $has_required |= $field_instance['required'];
       $child_entity = node_load($child->entity_id);
       if ( entity_access('view', $child->entity_type, $child_entity) ) {
         $field = field_info_field($field_name);
         if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-          $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
-          $has_required |= $field_instance['required'];
-          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-          $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
-                  strtolower(node_type_get_name($child_entity)) .
-                  ' ' . l($child_entity->title, 'node/'.$child->entity_id);
+          $reference = t('field %field!required in @type !name', array(
+            '%field' => $field_instance['label'],
+            '!required' => $required,
+            '@type' => strtolower(node_type_get_name($child_entity)),
+            '!name' => l($child_entity->title, 'node/'.$child->entity_id),
+          ));
         }
       }
       break;
+
     case 'user':
-      $reference = t('a person');
+      $field_instance = field_info_instance('user', $field_name, 'user');
+      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+      $reference = t('a field!required in a person', array('!required' => $required));
+      $has_required |= $field_instance['required'];
       if ( user_access('access user profiles') ) {
         $child_entity = user_load($child->entity_id);
         if ( entity_access('view', $child->entity_type, $child_entity) ) {
           $field = field_info_field($field_name);
           if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-            $field_instance = field_info_instance('user', $field_name, 'user');
-            $has_required |= $field_instance['required'];
-            $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-            $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
-                    t('person') . ' ' . l($child_entity->name, 'user/'.$child->entity_id);
+            $reference = t('field %field!required in person !person', array(
+              '%field' => $field_instance['label'],
+              '!required' => $required,
+              '!person' => l($child_entity->name, 'user/'.$child->entity_id),
+            ));
           }
         }
       }
       break;
+
     case 'taxonomy_term' :
-      $reference = t('a taxonomy term');
+      $field_instance = field_info_instance('taxonomy_term', $field_name, 'taxonomy_term');
+      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+      $reference = t('a field!required in a taxonomy term', array('!required' => $required));
+      $has_required |= $field_instance['required'];
       $child_entity = taxonomy_term_load($child->entity_id);
       if ( entity_access('view', $child->entity_type, $child_entity) ) {
         $field = field_info_field($field_name);
         if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-          $field_instance = field_info_instance('taxonomy_term', $field_name, 'taxonomy_term');
-          $has_required |= $field_instance['required'];
-          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-          $reference = t('field %field!required in', array('%field' => $field_instance['label'], '!required' => $required)) . ' ' .
-                  t('taxonomy term %term', array('%term' => $child_entity->name));
+          $reference = t('field %field!required in taxonomy term %term', array(
+            '%field' => $field_instance['label'],
+            '!required' => $required,
+            '%term' => $child_entity->name
+          ));
         }
       }
       break;
+
     default:
-      $reference = t('!article %type', array(
-        '!article' => in_array($child->entity_type[0], array('a', 'e', 'i', 'o', 'u')) ? t('an') : t('a'),
-        '%type' => $child->entity_type,
-      ));
+      $entity_info = entity_get_info($child->type);
+      try {
+        $child_entity = $entity_info['load hook']($child->entity_id);
+      }
+      catch ( Exception $e ) {
+        $has_required = TRUE; // Just set this as a default.
+        return t('something else on the site') . ' <span class="form-required" title="' . t('This field is required.') . '">*</span>';
+      }
+      $field_instance = field_info_instance($child->entity_type, $field_name, !empty($child_entity->type) ? $child_entity->type : $child->entity_type);
+      $reference = t('a !required field in something else on the site', array('!required' => $field_instance['required'] ? t('required') : ''));
+      $has_required |= $field_instance['required'];
+      if ( entity_access('view', $child->entity_type, $child_entity) ) {
+        $field = field_info_field($field_name);
+        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
+          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
+          $reference = t('field %field!required in @entity_type %name', array(
+            '%field' => $field_instance['label'],
+            '!required' => $required,
+            '@entity_type' => $child->entity_type,
+            '%name' => !empty($child_entity->name) ? $child_entity->name : '',
+          ));
+        }
+      }
       break;
   }
   return $reference;
