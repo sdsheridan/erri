@@ -194,11 +194,11 @@ function _erri_list_children($child_entities, &$has_required) {
 function _erri_get_reference($child, $field_name, &$has_required) {
   switch ( $child->entity_type ) {
     case 'node' :
+      $child_entity = node_load($child->entity_id);
       $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
       $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
       $reference = t('a field!required in a content item', array('!required' => $required));
       $has_required |= $field_instance['required'];
-      $child_entity = node_load($child->entity_id);
       if ( entity_access('view', $child->entity_type, $child_entity) ) {
         $field = field_info_field($field_name);
         if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
