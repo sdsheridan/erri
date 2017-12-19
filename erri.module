@@ -75,10 +75,15 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       }
 
       if ( !empty($child_entities) ) {
+        // Start by assuming no fields are required and the current user has edit
+        // permissions.  Then evaulate field-by-field and for each referenced entity,
+        // and change accordingly (done in the called functions, so vars passed by
+        // reference).
         $has_required = FALSE;
+        $has_edit_permissions = TRUE;
         if ( $single_item ) {
-          $list = _erri_list_children($child_entities, $has_required);
-          if ( $has_required ) {
+          $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
+          if ( $has_required || !$has_edit_permissions) {
             drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
             $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
                     array('%title' => $title));
@@ -91,10 +96,10 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         else {
           $list = array();
           foreach ( $child_entities as $entity => $children ) {
-            $sub_list = _erri_list_children($children, $has_required);
+            $sub_list = _erri_list_children($children, $has_required, $has_edit_permissions);
             $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
-          if ( $has_required ) {
+          if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
             $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
                     array('@title' => $title));
@@ -106,10 +111,17 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         }
 
         $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul>';
-        if ( $has_required ) {
-          $form['description']['#markup'] .= '<p><span class="form-required" title="' .
-                  t('This field is required.') . '">*</span> ' .
-                  t('Required field - cannot be left blank.') . '</p>';
+        if ( $has_required || !$has_edit_permissions ) {
+          if ( $has_required ) {
+            $form['description']['#markup'] .= '<p><span class="form-required" title="' .
+                    t('This field is required.') . '">*</span> ' .
+                    t('Required field - cannot be left blank.') . '</p>';
+          }
+          if ( !$has_edit_permissions ) {
+            $form['description']['#markup'] .= '<p>' .
+                    t('You do not have sufficient permissions on all referring items and / or fields to be able to delete this entity.') .
+                    '</p>';
+          }
           $form['actions']['submit']['#disabled'] = TRUE;
         }
         else {
@@ -171,12 +183,14 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
  * @param array $child_entities An array of child entities to be listed.
  * @param bool $has_required Passed by reference, a flag indicating if any of the
  *   listed fields are required fields.
+ * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
+ *   current user has permissions to edit all child entities.
  * @return array The list of strings.
  */
-function _erri_list_children($child_entities, &$has_required) {
+function _erri_list_children($child_entities, &$has_required, &$has_edit_permissions) {
   foreach ( $child_entities as $field_name => $children ) {
     foreach ( $children as $child ) {
-      $list[] = _erri_get_reference($child, $field_name, $has_required);
+      $list[] = _erri_get_reference($child, $field_name, $has_required, $has_edit_permissions);
     }
   }
   return $list;
@@ -189,92 +203,72 @@ function _erri_list_children($child_entities, &$has_required) {
  * @param bool $has_required Passed by reference, a flag indicating if any of the
  *   previous listed fields are required fields, and set to TRUE if this field's
  *   instance is required.
+ * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
+ *   current user has permissions to edit all child entities.
  * @return string The referencing message.
  */
-function _erri_get_reference($child, $field_name, &$has_required) {
-  switch ( $child->entity_type ) {
-    case 'node' :
-      $child_entity = node_load($child->entity_id);
-      $field_instance = field_info_instance($child->entity_type, $field_name, $child_entity->type);
-      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-      $reference = t('a field!required in a content item', array('!required' => $required));
-      $has_required |= $field_instance['required'];
-      if ( entity_access('view', $child->entity_type, $child_entity) ) {
-        $field = field_info_field($field_name);
-        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-          $reference = t('field %field!required in @type !name', array(
-            '%field' => $field_instance['label'],
-            '!required' => $required,
-            '@type' => strtolower(node_type_get_name($child_entity)),
-            '!name' => l($child_entity->title, 'node/'.$child->entity_id),
-          ));
-        }
-      }
-      break;
-
-    case 'user':
-      $field_instance = field_info_instance('user', $field_name, 'user');
-      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-      $reference = t('a field!required in a person', array('!required' => $required));
-      $has_required |= $field_instance['required'];
-      if ( user_access('access user profiles') ) {
-        $child_entity = user_load($child->entity_id);
-        if ( entity_access('view', $child->entity_type, $child_entity) ) {
-          $field = field_info_field($field_name);
-          if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-            $reference = t('field %field!required in person !person', array(
-              '%field' => $field_instance['label'],
-              '!required' => $required,
-              '!person' => l($child_entity->name, 'user/'.$child->entity_id),
-            ));
-          }
-        }
-      }
-      break;
-
-    case 'taxonomy_term' :
-      $field_instance = field_info_instance('taxonomy_term', $field_name, 'taxonomy_term');
-      $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-      $reference = t('a field!required in a taxonomy term', array('!required' => $required));
-      $has_required |= $field_instance['required'];
-      $child_entity = taxonomy_term_load($child->entity_id);
-      if ( entity_access('view', $child->entity_type, $child_entity) ) {
-        $field = field_info_field($field_name);
-        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-          $reference = t('field %field!required in taxonomy term %term', array(
-            '%field' => $field_instance['label'],
-            '!required' => $required,
-            '%term' => $child_entity->name
-          ));
-        }
-      }
-      break;
-
-    default:
-      $entity_info = entity_get_info($child->type);
-      try {
-        $child_entity = $entity_info['load hook']($child->entity_id);
-      }
-      catch ( Exception $e ) {
-        $has_required = TRUE; // Just set this as a default.
-        return t('something else on the site') . ' <span class="form-required" title="' . t('This field is required.') . '">*</span>';
-      }
-      $field_instance = field_info_instance($child->entity_type, $field_name, !empty($child_entity->type) ? $child_entity->type : $child->entity_type);
-      $reference = t('a !required field in something else on the site', array('!required' => $field_instance['required'] ? t('required') : ''));
-      $has_required |= $field_instance['required'];
-      if ( entity_access('view', $child->entity_type, $child_entity) ) {
-        $field = field_info_field($field_name);
-        if ( field_access('view', $field, $child->entity_type, $child_entity) ) {
-          $required = $field_instance['required'] ? ' <span class="form-required" title="' . t('This field is required.') . '">*</span>' : '';
-          $reference = t('field %field!required in @entity_type %name', array(
-            '%field' => $field_instance['label'],
-            '!required' => $required,
-            '@entity_type' => $child->entity_type,
-            '%name' => !empty($child_entity->name) ? $child_entity->name : '',
-          ));
-        }
-      }
-      break;
+function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_permissions) {
+  $entity_info = entity_get_info($child->entity_type);
+  if ( function_exists($entity_info['load hook']) ) {
+    try {
+      $child_entity = $entity_info['load hook']($child->entity_id);
+    }
+    catch ( Exception $e ) {
+      watchdog('erri', 'Error in loading entity info with function %function for @type @id: %error', array(
+          '%function' => $entity_info['load hook'],
+          '@type' => $child->entity_type,
+          '@id' => $child->entity_id,
+          '%error' => $e->getMessage(),
+        ), WATCHDOG_ERROR);
+      $has_required = TRUE; // Just set this as a default.
+      $has_edit_permissions = FALSE;
+      return t('something else on the site') . ' <span class="form-required" title="' .
+              t('This field is required.') . '">*</span>';
+    }
+  }
+  else {
+    watchdog('erri', 'Load function %function does not exist for @type @id.', array(
+        '%function' => $entity_info['load hook'],
+        '@type' => $child->entity_type,
+        '@id' => $child->entity_id,
+      ), WATCHDOG_ERROR);
+    $has_required = TRUE; // Just set this as a default.
+    $has_edit_permissions = FALSE;
+    return t('something else on the site') . ' <span class="form-required" title="' .
+            t('This field is required.') . '">*</span>';
+  }
+  $field = field_info_field($field_name);
+  $type = !empty($entity_info['entity keys']['bundle'])
+          ? $child_entity->{$entity_info['entity keys']['bundle']}
+          : $child->entity_type;
+  $field_instance = field_info_instance($child->entity_type, $field_name, $type);
+  $required = $field_instance['required'] ? ' <span class="form-required" title="' .
+          t('This field is required.') . '">*</span>' : '';
+  $reference = t('a field!required in a content item', array('!required' => $required));
+  $has_required |= $field_instance['required'];
+  $has_edit_permissions &= entity_access('update', $child->entity_type, $child_entity) &&
+          field_access('update', $field, $child->entity_type, $child_entity);
+  $type_name = !empty($entity_info['entity keys']['bundle'])
+          ? $entity_info['bundles'][$child_entity->{$entity_info['entity keys']['bundle']}]['label']
+          : $entity_info['label'];
+  if ( entity_access('view', $child->entity_type, $child_entity) &&
+          field_access('view', $field, $child->entity_type, $child_entity) ) {
+    $uri = $entity_info['uri callback']($child_entity);
+    $name = !empty($entity_info['label callback'])
+            ? $entity_info['label callback']($child_entity)
+            : ( !empty($entity_info['entity keys']['label'])
+                    ? $child_entity->{$entity_info['entity keys']['label']}
+                    : ( !empty($child_entity->name)
+                            ? $child_entity->name
+                            : ( !empty($child_entity->title)
+                                    ? $child_entity->title
+                                    : t('with id @id', array('@id' => $child->entity_id)) ) ));
+    $reference = t('field %field!required in @type !name', array(
+      '%field' => $field_instance['label'],
+      '!required' => $required,
+      '@type' => strtolower($type_name),
+      '!name' => l($name, $uri['path']),
+    ));
   }
   return $reference;
 }
