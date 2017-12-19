@@ -19,7 +19,7 @@
  *         entity that is being deleted.  This function will be passed the form array.
  *   'entities' => Required for multi-entity delete forms, and cannot be present for
  *         single-entity delete forms.  Specifies the function to call to return an
- *         array with the keys being the entity IDs that are being deleted.  This 
+ *         array with the keys being the entity IDs that are being deleted.  This
  *         function will be passed the form array.
  *   'entity_id' => Required.  The name of the object property holding the entity ID.
  *   'target_type' => Required.  The machine name of the entity type being deleted.
@@ -36,7 +36,7 @@
  *   'use_id_in_name' => TRUE if the entity ID should be shown along with the entity
  *         name in the output for multi-entity delete forms.  Set to TRUE if entity's
  *         can have non-unique names.
- * 
+ *
  *   @see erri.inc
  */
 function hook_erri_info() {
@@ -62,6 +62,50 @@ function hook_erri_info() {
       'use_id_in_name' => TRUE,
     ),
   );
+}
+
+/**
+ * Provide additional fields to Entity Reference Referential Integrity to check.
+ * The hook should return an array by field name with each field type either
+ * entityreference or taxonomy_term_reference.  This will require overriding the
+ * actual field type to indicate to what the column specified as the referring
+ * column is actually pointing.  Note that these fields must be fields defined
+ * through the fields API.
+ *
+ * @return array An array of fields in the same format as would be returned by
+ *   field_read_fields().
+ */
+function hook_erri_reference_fields() {
+  $fields = array(
+    'my_field_name' => array(
+      'type' => 'entityreference',
+      'settings' => array(
+        'target_type' => 'node',
+        'handler_settings' => array(
+          'target_bundles' => array('my_bundle', 'my_other_bundle'),
+        ),
+      ),
+      'storage' => array(
+        'details' => array(
+          'sql' => array(
+            'FIELD_LOAD_CURRENT' => array(
+              'field_data_field_my_field_name' => array(
+                'target_id' => 'field_my_field_name_target_id',
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  $other_fields = field_read_fields(array('type' => 'my_field_type'));
+  foreach ( $other_fields as &$field ) {
+    $field['type'] = 'entityreference'; // Override the field type to have it checked.
+    foreach ( array_keys($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) as $table ) {
+      $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'][$table]['target_id'] = 'field_the_entity_reference_column_name';
+    }
+  }
+  return $fields + $other_fields;
 }
 
 /**

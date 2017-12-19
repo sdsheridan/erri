@@ -151,6 +151,14 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
   if ( $parent_entity_type == 'taxonomy_term' ) {
     $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
   }
+  // Allow other modules to add to the reference fields.
+  foreach ( module_implements('erri_reference_fields') as $module ) {
+    $function = $module . '_erri_reference_fields';
+    $additional_fields = $function();
+    if ( is_array($additional_fields) ) {
+      $reference_fields += $additional_fields;
+    }
+  }
   foreach ( $reference_fields as $field ) {
     // If it's an entityreference referring to the right entity type, or...
     if ( ( $field['type'] == 'entityreference' && $field['settings']['target_type'] == $parent_entity_type  ||
