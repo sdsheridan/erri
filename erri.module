@@ -161,7 +161,9 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
   }
   foreach ( $reference_fields as $field ) {
     // If it's an entityreference referring to the right entity type, or...
-    if ( ( $field['type'] == 'entityreference' && $field['settings']['target_type'] == $parent_entity_type  ||
+    if ( ( !empty($field['type']) && (
+            $field['type'] == 'entityreference' && !empty($field['settings']['target_type']) &&
+            $field['settings']['target_type'] == $parent_entity_type  ||
             // ...it's a taxonomy term reference and we're testing against a taxonomy term, and...
             $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
             // ...the field is in fact being used, and...
@@ -169,7 +171,8 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
             // ...and either the form isn't for an entity type that uses bundles, or...
             !$parent_entity_type_has_bundles || empty($field['settings']['handler_settings']['target_bundles']) ||
             // ...the entity type (bundle) is one of the field's target bundles...
-            in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) {
+            is_array($field['settings']['handler_settings']['target_bundles']) &&
+            in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) ) {
       $child_entities[$field['field_name']] = array();
       foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
         $column_name = current($column);
