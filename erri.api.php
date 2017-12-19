@@ -101,8 +101,9 @@ function hook_erri_reference_fields() {
   $other_fields = field_read_fields(array('type' => 'my_field_type'));
   foreach ( $other_fields as &$field ) {
     $field['type'] = 'entityreference'; // Override the field type to have it checked.
+    $field['settings']['target_type'] = 'node'; // Set this if it isn't set in the field definition.
     foreach ( array_keys($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) as $table ) {
-      $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'][$table]['target_id'] = 'field_the_entity_reference_column_name';
+      $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'][$table] = array('target_id' => 'field_the_entity_reference_column_name');
     }
   }
   return $fields + $other_fields;
