@@ -178,11 +178,26 @@ function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_h
         $column_name = current($column);
         // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
         // so that array arithmatic doesn't stomp on array elements.
-        $child_entities[$field['field_name']] += db_query("SELECT *, CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk FROM {{$table}} "
-        . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
+        $child_entities[$field['field_name']] += db_query("SELECT *, "
+                . "CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk, 'current' AS revision FROM {{$table}} "
+                . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
+      }
+      // Now see if there are any previous revisions.
+      if ( !empty($field['storage']['details']['sql']['FIELD_LOAD_REVISION']) ) {
+        foreach ( $field['storage']['details']['sql']['FIELD_LOAD_REVISION'] as $table => $column ) {
+          $column_name = current($column);
+          // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
+          // so that array arithmatic doesn't stomp on array elements.
+          $child_entities[$field['field_name']] += db_query("SELECT *, "
+                  . "CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk, 'revision' AS revision FROM {{$table}} "
+                  . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
+        }
       }
       if ( empty($child_entities[$field['field_name']]) ) {
         unset($child_entities[$field['field_name']]);
+      }
+      else {
+        ksort($child_entities[$field['field_name']]);
       }
     }
   }
@@ -274,9 +289,10 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
                             : ( !empty($child_entity->title)
                                     ? $child_entity->title
                                     : t('with id @id', array('@id' => $child->entity_id)) ) ));
-    $reference = t('field %field!required in @type !name', array(
+    $reference = t('field %field!required in !revision @type !name', array(
       '%field' => $field_instance['label'],
       '!required' => $required,
+      '!revision' => $child->revision == 'revision' ? t('a previous revision of') : '',
       '@type' => strtolower($type_name),
       '!name' => l($name, $uri['path']),
     ));
@@ -295,9 +311,14 @@ function erri_delete_form_submit($form, &$form_state) {
   $entities_and_field_names = $form_state['values']['erri_entities_and_field_names'];
   foreach ( $entities_and_field_names as $entity_id => $field_name ) {
     $field = field_info_field($field_name);
-    foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
-      $column_name = current($column);
-      db_delete($table)->condition($column_name, $entity_id)->execute();
+    foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
+      if ( empty($field['storage']['details']['sql'][$revision]) ) {
+        continue;
+      }
+      foreach ( $field['storage']['details']['sql'][$revision] as $table => $column ) {
+        $column_name = current($column);
+        db_delete($table)->condition($column_name, $entity_id)->execute();
+      }
     }
   }
   drupal_flush_all_caches();
