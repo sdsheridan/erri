@@ -12,14 +12,11 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
   static $delete_forms = array();
   if ( empty($delete_forms) ) {
     module_load_include('inc', 'erri');
-    $hooks = module_implements('erri_info');
-    foreach ( $hooks as $hook ) {
-      $function = $hook . '_erri_info';
-      if ( function_exists($function) ) {
-        $result = $function();
-        if ( is_array($result) ) {
-          $delete_forms += $result;
-        }
+    foreach ( module_implements('erri_info') as $module ) {
+      $function = $module . '_erri_info';
+      $result = $function();
+      if ( is_array($result) ) {
+        $delete_forms += $result;
       }
     }
   }
@@ -83,7 +80,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $has_edit_permissions = TRUE;
         if ( $single_item ) {
           $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
-          if ( $has_required || !$has_edit_permissions) {
+          if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
             $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
                     array('%title' => $title));
@@ -263,10 +260,15 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
     return t('something else on the site') . ' <span class="form-required" title="' .
             t('This field is required.') . '">*</span>';
   }
+  if ( !empty($entity_info['entity keys']['bundle']) ) {
+    $type = $child_entity->{$entity_info['entity keys']['bundle']};
+    $type_name = $entity_info['bundles'][$child_entity->{$entity_info['entity keys']['bundle']}]['label'];
+  }
+  else {
+    $type = $child->entity_type;
+    $type_name = $entity_info['label'];
+  }
   $field = field_info_field($field_name);
-  $type = !empty($entity_info['entity keys']['bundle'])
-          ? $child_entity->{$entity_info['entity keys']['bundle']}
-          : $child->entity_type;
   $field_instance = field_info_instance($child->entity_type, $field_name, $type);
   $required = $field_instance['required'] ? ' <span class="form-required" title="' .
           t('This field is required.') . '">*</span>' : '';
@@ -274,21 +276,12 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
   $has_required |= $field_instance['required'];
   $has_edit_permissions &= entity_access('update', $child->entity_type, $child_entity) &&
           field_access('update', $field, $child->entity_type, $child_entity);
-  $type_name = !empty($entity_info['entity keys']['bundle'])
-          ? $entity_info['bundles'][$child_entity->{$entity_info['entity keys']['bundle']}]['label']
-          : $entity_info['label'];
   if ( entity_access('view', $child->entity_type, $child_entity) &&
           field_access('view', $field, $child->entity_type, $child_entity) ) {
-    $uri = $entity_info['uri callback']($child_entity);
-    $name = !empty($entity_info['label callback'])
-            ? $entity_info['label callback']($child_entity)
-            : ( !empty($entity_info['entity keys']['label'])
-                    ? $child_entity->{$entity_info['entity keys']['label']}
-                    : ( !empty($child_entity->name)
-                            ? $child_entity->name
-                            : ( !empty($child_entity->title)
-                                    ? $child_entity->title
-                                    : t('with id @id', array('@id' => $child->entity_id)) ) ));
+    $uri = entity_uri($child->entity_type, $child_entity);
+    if ( !($name = entity_label($child->entity_type, $child_entity)) ) {
+      $name = t('with id @id', array('@id' => $child->entity_id));
+    }
     $reference = t('field %field!required in !revision @type !name', array(
       '%field' => $field_instance['label'],
       '!required' => $required,
