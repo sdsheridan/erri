@@ -23,13 +23,8 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
 
   // If the current form is a delete form...
   if ( !empty($delete_forms[$form_id]) ) {
-    $delete_form = &$delete_forms[$form_id] + array(
-      'entity_id' => 'id',
-      'target_type' => NULL,
-      'bundles' => FALSE,
-      'name_field' => 'name',
-      'entity_load_function' => 'entity_load',
-    );
+    $delete_form = &$delete_forms[$form_id];
+    $parent_entity_info = entity_get_info($delete_form['target_type']);
     $form_copy = $form; // Keep the original form array 'safe'.
     // ...and this is the delete version of the form for forms that serve multiple purposes...
     if ( empty($delete_form['is_delete_form']) || !empty($delete_form['is_delete_form']) &&
@@ -40,27 +35,33 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         // Retrieve the entity being deleted from the form.
         $entity = $delete_form['entity']($form_copy);
         // Get the entity's ID.
-        $id = $entity->{$delete_form['entity_id']};
+        $id = $entity->{$parent_entity_info['entity keys']['id']};
+        $bundle = !empty($parent_entity_info['entity keys']['bundle'])
+                ? $entity->{$parent_entity_info['entity keys']['bundle']}
+                : NULL;
         $child_entities = erri_get_child_entities($delete_form['target_type'], $id,
-                !empty($delete_form['bundles']), !empty($entity->type) ? $entity->type : NULL);
+                !empty($parent_entity_info['entity keys']['bundle']), $bundle);
         $field_names = array($id => array_keys($child_entities));
-        $title = $entity->{$delete_form['name_field']};
+        $title = entity_label($delete_form['target_type'], $entity);
       }
       // If 'entities' is specified, then this is a multi-entity delete form
       elseif ( !empty($delete_form['entities']) && function_exists($delete_form['entities']) ) {
         $single_item = FALSE;
         $child_entities = array();
         // Get the entities from the form.
-        $entities = $delete_form['entities']($form_copy);
-        $entity_ids = element_children($entities);
+        $entity_ids = element_children($delete_form['entities']($form_copy));
         $field_names = array();
         foreach ( $entity_ids as $id ) {
           // Get the full entity via the entity's load function.
-          $entity = $delete_form['entity_load_function']($id);
+          $entity = $parent_entity_info['load hook']($id);
           // Group index is used as a title for a section.
-          $group_index = $entity->{$delete_form['name_field']} . ( !empty($delete_form['use_id_in_name']) ? " ($id)" : '' );
+          $uri = entity_uri($delete_form['target_type'], $entity);
+          $group_index = entity_label($delete_form['target_type'], $entity) . ':' . $uri['path'];
+          $bundle = !empty($parent_entity_info['entity keys']['bundle'])
+                  ? $entity->{$parent_entity_info['entity keys']['bundle']}
+                  : NULL;
           $child_entities[$group_index] = erri_get_child_entities($delete_form['target_type'], $id,
-                  !empty($delete_form['bundles']), !empty($entity->type) ? $entity->type : NULL);
+                  !empty($parent_entity_info['entity keys']['bundle']), $bundle);
           if ( empty($child_entities[$group_index]) ) {
             unset($child_entities[$group_index]);
           }
@@ -68,7 +69,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             $field_names[$id] = array_keys($child_entities[$group_index]);
           }
         }
-        $title = $delete_form['type_name'];
+        $title = strtolower($parent_entity_info['plural label']);
       }
 
       if ( !empty($child_entities) ) {
@@ -94,7 +95,8 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $list = array();
           foreach ( $child_entities as $entity => $children ) {
             $sub_list = _erri_list_children($children, $has_required, $has_edit_permissions);
-            $list[] = t('%entity is referred to by:', array('%entity' => $entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
+            list($entity, $uri) = explode(':', $entity, 2);
+            $list[] = t('!entity is referred to by:', array('!entity' => l($entity, $uri))) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
           if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
@@ -144,61 +146,91 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
  */
 function erri_get_child_entities($parent_entity_type, $id, $parent_entity_type_has_bundles = FALSE, $bundle = '') {
   $child_entities = array();
-  $reference_fields = field_read_fields(array('type' => 'entityreference'));
-  if ( $parent_entity_type == 'taxonomy_term' ) {
-    $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
-  }
-  // Allow other modules to add to the reference fields.
-  foreach ( module_implements('erri_reference_fields') as $module ) {
-    $function = $module . '_erri_reference_fields';
-    $additional_fields = $function();
-    if ( is_array($additional_fields) ) {
-      $reference_fields += $additional_fields;
-    }
-  }
-  foreach ( $reference_fields as $field ) {
-    // If it's an entityreference referring to the right entity type, or...
-    if ( ( !empty($field['type']) && (
-            $field['type'] == 'entityreference' && !empty($field['settings']['target_type']) &&
-            $field['settings']['target_type'] == $parent_entity_type  ||
-            // ...it's a taxonomy term reference and we're testing against a taxonomy term, and...
-            $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
-            // ...the field is in fact being used, and...
-            !empty($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) && (
-            // ...and either the form isn't for an entity type that uses bundles, or...
-            !$parent_entity_type_has_bundles || empty($field['settings']['handler_settings']['target_bundles']) ||
-            // ...the entity type (bundle) is one of the field's target bundles...
-            is_array($field['settings']['handler_settings']['target_bundles']) &&
-            in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) ) {
-      $child_entities[$field['field_name']] = array();
-      foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
-        $column_name = current($column);
-        // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
-        // so that array arithmatic doesn't stomp on array elements.
-        $child_entities[$field['field_name']] += db_query("SELECT *, "
-                . "CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk, 'current' AS revision FROM {{$table}} "
-                . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
-      }
-      // Now see if there are any previous revisions.
-      if ( !empty($field['storage']['details']['sql']['FIELD_LOAD_REVISION']) ) {
-        foreach ( $field['storage']['details']['sql']['FIELD_LOAD_REVISION'] as $table => $column ) {
+  $reference_fields = erri_get_reference_fields();
+  if ( !empty($reference_fields) ) {
+    $entity_info = entity_get_info();
+    foreach ( $reference_fields as $field ) {
+      // If it's an entityreference referring to the right entity type, or...
+      if ( ( !empty($field['type']) && (
+              $field['type'] == 'entityreference' && !empty($field['settings']['target_type']) &&
+              $field['settings']['target_type'] == $parent_entity_type ||
+              // ...it's a taxonomy term reference and we're testing against a taxonomy term, and...
+              $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
+              // ...the field is in fact being used, and...
+              !empty($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) && (
+              // ...and either the form isn't for an entity type that uses bundles, or...
+              !$parent_entity_type_has_bundles || empty($field['settings']['handler_settings']['target_bundles']) ||
+              // ...the entity type (bundle) is one of the field's target bundles...
+              is_array($field['settings']['handler_settings']['target_bundles']) &&
+              in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) ) {
+        $child_entities[$field['field_name']] = array();
+        foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
           $column_name = current($column);
           // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
           // so that array arithmatic doesn't stomp on array elements.
           $child_entities[$field['field_name']] += db_query("SELECT *, "
-                  . "CONCAT(entity_type, ':', bundle, ':', entity_id) AS pk, 'revision' AS revision FROM {{$table}} "
+                  . "CONCAT(entity_type, ':', bundle, ':', entity_id, ':', revision_id) AS pk, "
+                  . "'current' AS revision FROM {{$table}} "
                   . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
         }
-      }
-      if ( empty($child_entities[$field['field_name']]) ) {
-        unset($child_entities[$field['field_name']]);
-      }
-      else {
-        ksort($child_entities[$field['field_name']]);
+        // Now see if there are any previous revisions.
+        if ( !empty($field['storage']['details']['sql']['FIELD_LOAD_REVISION']) ) {
+          foreach ( $field['storage']['details']['sql']['FIELD_LOAD_REVISION'] as $table => $column ) {
+            $column_name = current($column);
+            $query = db_select($table, $table)
+                    ->fields($table)
+                    ->condition($column_name, $id)
+                    ->condition('deleted', 0);
+            // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
+            // so that array arithmatic doesn't stomp on array elements.
+            $query->addExpression("CONCAT($table.entity_type, ':', $table.bundle, ':', $table.entity_id, ':', $table.revision_id)", 'pk');
+            $query->addExpression("'revision'", 'revision');
+            if ( !empty($entity_info[$field['settings']['target_type']]['revision table']) &&
+                    !empty($entity_info[$field['settings']['target_type']]['entity keys']['id']) &&
+                    !empty($entity_info[$field['settings']['target_type']]['entity keys']['revision']) &&
+                    db_field_exists($entity_info[$field['settings']['target_type']]['revision table'], 'timestamp')) {
+              $revision_entity_info = &$entity_info[$field['settings']['target_type']];
+              $query->addJoin('inner', $revision_entity_info['revision table'],
+                      'r', "$table.entity_id = r.{$revision_entity_info['entity keys']['id']} AND "
+                      . "$table.revision_id = r.{$revision_entity_info['entity keys']['revision']} AND "
+                      . "$table.entity_type = '{$field['settings']['target_type']}'");
+              $query->addField('r', 'timestamp', 'revision_timestamp');
+            }
+            $child_entities[$field['field_name']] += $query->execute()->fetchAllAssoc('pk');
+          }
+        }
+        if ( empty($child_entities[$field['field_name']]) ) {
+          unset($child_entities[$field['field_name']]);
+        }
+        else {
+          krsort($child_entities[$field['field_name']]);
+        }
       }
     }
   }
   return $child_entities;
+}
+
+/**
+ * Helper function to get all reference fields.
+ * @staticvar array $referece_fields All reference fields.
+ * @return array All reference fields.
+ */
+function erri_get_reference_fields() {
+  static $referece_fields = array();
+  if ( empty($referece_fields) ) {
+    $reference_fields = field_read_fields(array('type' => 'entityreference'));
+    $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
+    // Allow other modules to add to the reference fields.
+    foreach ( module_implements('erri_reference_fields') as $module ) {
+      $function = $module . '_erri_reference_fields';
+      $additional_fields = $function();
+      if ( is_array($additional_fields) ) {
+        $reference_fields += $additional_fields;
+      }
+    }
+  }
+  return $reference_fields;
 }
 
 /**
@@ -285,7 +317,11 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
     $reference = t('field %field!required in !revision @type !name', array(
       '%field' => $field_instance['label'],
       '!required' => $required,
-      '!revision' => $child->revision == 'revision' ? t('a previous revision of') : '',
+      '!revision' => $child->revision == 'revision'
+            ? ( !empty($child->revision_timestamp)
+              ? t('the !ts revision of', array('!ts' => format_date($child->revision_timestamp)))
+              : t('a previous revision of') )
+            : '',
       '@type' => strtolower($type_name),
       '!name' => l($name, $uri['path']),
     ));
@@ -301,16 +337,18 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
  * @param array $form_state The state of the form.
  */
 function erri_delete_form_submit($form, &$form_state) {
-  $entities_and_field_names = $form_state['values']['erri_entities_and_field_names'];
-  foreach ( $entities_and_field_names as $entity_id => $field_name ) {
-    $field = field_info_field($field_name);
-    foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
-      if ( empty($field['storage']['details']['sql'][$revision]) ) {
-        continue;
-      }
-      foreach ( $field['storage']['details']['sql'][$revision] as $table => $column ) {
-        $column_name = current($column);
-        db_delete($table)->condition($column_name, $entity_id)->execute();
+  $reference_fields = erri_get_reference_fields();
+  foreach ( $form_state['values']['erri_entities_and_field_names'] as $entity_id => $field_names ) {
+    foreach ( $field_names as $field_name ) {
+      $field = $reference_fields[$field_name];
+      foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
+        if ( empty($field['storage']['details']['sql'][$revision]) ) {
+          continue;
+        }
+        foreach ( $field['storage']['details']['sql'][$revision] as $table => $column ) {
+          $column_name = current($column);
+          db_delete($table)->condition($column_name, $entity_id)->execute();
+        }
       }
     }
   }
