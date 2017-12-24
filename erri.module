@@ -73,6 +73,27 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       }
 
       if ( !empty($child_entities) ) {
+        // Get the description and submit elements of the form.
+        if ( !empty($delete_form['description_element']) ) {
+          $element_trail = explode('][', $delete_form['description_element']);
+          $description_element = &$form;
+          foreach ( $element_trail as $element ) {
+            $description_element = &$description_element[$element];
+          }
+        }
+        else {
+          $description_element = &$form['description']['#markup'];
+        }
+        if ( !empty($delete_form['submit_element']) ) {
+          $element_trail = explode('][', $delete_form['submit_element']);
+          $submit_element = &$form;
+          foreach ( $element_trail as $element ) {
+            $submit_element = &$submit_element[$element];
+          }
+        }
+        else {
+          $submit_element = &$form['actions']['submit'];
+        }
         // Start by assuming no fields are required and the current user has edit
         // permissions.  Then evaulate field-by-field and for each referenced entity,
         // and change accordingly (done in the called functions, so vars passed by
@@ -83,11 +104,11 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
           if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete %title', array('%title' => check_plain($title))), PASS_THROUGH);
-            $form['description']['#markup'] = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
+            $description_element = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
                     array('%title' => $title));
           }
           else {
-            $form['description']['#markup'] .= '<div class="erri">' . t('%title cannot be deleted without emptying:',
+            $description_element .= '<div class="erri">' . t('%title cannot be deleted without emptying:',
                     array('%title' => $title));
           }
         }
@@ -100,35 +121,35 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           }
           if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => strtolower($title))), PASS_THROUGH);
-            $form['description']['#markup'] = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
+            $description_element = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
                     array('@title' => $title));
           }
           else {
-            $form['description']['#markup'] .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emtpying referring fields:',
+            $description_element .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emtpying referring fields:',
                     array('@title' => $title));
           }
         }
 
-        $form['description']['#markup'] .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul>';
+        $description_element .= '<ul><li>' . implode('</li><li>', $list) . '</li></ul>';
         if ( $has_required || !$has_edit_permissions ) {
           if ( $has_required ) {
-            $form['description']['#markup'] .= '<p><span class="form-required" title="' .
+            $description_element .= '<p><span class="form-required" title="' .
                     t('This field is required.') . '">*</span> ' .
                     t('Required field - cannot be left blank.') . '</p>';
           }
           if ( !$has_edit_permissions ) {
-            $form['description']['#markup'] .= '<p>' .
+            $description_element .= '<p>' .
                     t('You do not have sufficient permissions on all referring items and / or fields to be able to delete this entity.') .
                     '</p>';
           }
-          $form['actions']['submit']['#disabled'] = TRUE;
+          $submit_element['#disabled'] = TRUE;
         }
         else {
-          $form['actions']['submit']['#value'] .= ' ' . t('and empty referring fields');
+          $submit_element['#value'] .= ' ' . t('and empty referring fields');
           $form['erri_entities_and_field_names'] = array('#type' => 'value', '#value' => $field_names);
           $form['#submit'][] = 'erri_delete_form_submit';
         }
-        $form['description']['#markup'] .= '</div>';
+        $description_element .= '</div>';
         $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
       }
     }
