@@ -40,7 +40,7 @@ function to create their delete forms, or at least have elements either
 identical to or like the ['description']['#markup'] form element and the
 ['actions']['submit'] button used for the delete (see
 https://api.drupal.org/api/drupal/modules%21system%21system.module/funct...). If
-your module's custom delete confirmation form doesn't have those elements
+your module's custom delete confirmation form does not have those elements
 identical to those supplied by confirm_form(), you can specify equivalent
 elements in hook_erri_info(). Note that the description element must be one that
 permits the concatenation of text, and the submit element must be of #type
@@ -55,12 +55,20 @@ hook_erri_reference_fields() will allow your module to leverage this module's
 integrity checking. Such fields must be created through the field API, as this
 module relies on other aspects of the Field API to do its work.
 
+A module can implement hook_erri_reference_check() to add referring / child
+things to the list of dependants if the module does not use the field API to
+store its data, but still wants to hook into the reference checking.  In this
+case, your hook is passed the parent entity type, id, and bundle where there is
+a bundle, and you're responsible for doing your own reference checking in the
+hook, and if there is references, passing back an appropriately structured array
+of references.  See erri.api.php for details.
+
 A module can call the function erri_get_child_entities, passing it the specified
 parameters, to get a two-level array of child entities for a particular parent,
 keyed on the field referencing the parent, and then act accordingly. For
 example:
 
-    $fields = erri_get_child_entities('node', $parent->nid, TRUE, 'customer');
+    $fields = erri_get_child_entities('node', $parent->nid, 'customer');
     if ( !empty($fields) ) {
       foreach ( $fields as $field_name => $children ) {
         // $children is an array with each element an array of entity_type,

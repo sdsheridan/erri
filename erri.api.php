@@ -108,5 +108,43 @@ function hook_erri_reference_fields() {
 }
 
 /**
+ * Allow custom modules to provide their own, non-field API reference information.
+ * @param string $parent_entity_type The entity_type of the parent entity (eg., 'node', 'user', 'taxonomy_term', etc.).
+ * @param int $id The ID of the parent entity.
+ * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
+ * @return array An array whose keys are the unique machine names of the referencing fields / locations, each pointing
+ *   to an array of unique referrer ids, each pointing to an array of properties as indicated below:
+ *   '#markup': The string that should be displayed to the end user.  If there are permission issues, your module
+ *       should take care of any adjustment to this string to reflect those permissions.
+ *   '#required': TRUE if the referring location requires there to be a value.  If this is true, the '#markup' should
+ *       also indicate that to the end user.
+ *   '#has_permissions' => TRUE if the current user has update permissions on the referring location.
+ * For each location key, it is good practice to preface it with your module's name to avoid any name-space collisions.  If
+ * the parent entity is not used anywhere in your module, simply return nothing.
+ */
+function hook_erri_reference_check($parent_entity_type, $id, $bundle = NULL) {
+  $where = my_module_entitiy_is_in_use($parent_entity_type, $id);
+  if ( !empty($where) ) {
+    $child_entities = array();
+    foreach ( $where as $referrer_id => $referrer ) {
+      $child_entities['my_module_custom_location'] = array(
+        $referrer_id => array(
+          '#markup' => t('%location!required in %referrer', array(
+            '%location' => $referrer->referring_location_string,
+            '!required' => $referrer->referring_required ? ' <span class="form-required" title="' .
+                    t('This field is required.') . '">*</span>' : '',
+            '%referrer' => $referrer->referrer_label_string,
+          )),
+          '#required' => $referrer->referring_required,
+          '#has_permissions' => my_module_current_user_has_edit_permissions($parent_entity_type, $id),
+        ),
+      );
+    }
+    return $child_entities;
+  }
+}
+
+
+/**
  * @} End of "addtogroup hooks".
  */
