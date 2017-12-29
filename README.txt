@@ -60,8 +60,8 @@ things to the list of dependants if the module does not use the field API to
 store its data, but still wants to hook into the reference checking.  In this
 case, your hook is passed the parent entity type, id, and bundle where there is
 a bundle, and you're responsible for doing your own reference checking in the
-hook, and if there is references, passing back an appropriately structured array
-of references.  See erri.api.php for details.
+hook, and if there are references, passing back an appropriately structured
+array of references.  See erri.api.php for details.
 
 A module can call the function erri_get_child_entities, passing it the specified
 parameters, to get a two-level array of child entities for a particular parent,
