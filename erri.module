@@ -50,7 +50,8 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $single_item = FALSE;
         $child_entities = array();
         // Get the entities from the form.
-        $parent_entity_ids = element_children($delete_form['entities']($form_copy));
+        $parent_entities = $delete_form['entities']($form_copy);
+        $parent_entity_ids = element_children($parent_entities);
         $field_names = array();
         foreach ( $parent_entity_ids as $id ) {
           // Get the full entity via the entity's load function.
