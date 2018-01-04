@@ -26,14 +26,15 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
     $delete_form = &$delete_forms[$form_id];
     $parent_entity_info = entity_get_info($delete_form['target_type']);
     $form_copy = $form; // Keep the original form array 'safe'.
+    $form_state_copy = $form_state; // Keep the original form_state array 'safe'.
     // ...and this is the delete version of the form for forms that serve multiple purposes...
     if ( empty($delete_form['is_delete_form']) ||
-            function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form_copy) ) {
+            function_exists($delete_form['is_delete_form']) && $delete_form['is_delete_form']($form_copy, $form_state_copy) ) {
       // If 'entity' is specified in the delete from, then this is a single instance delete form.
       if ( !empty($delete_form['entity']) && function_exists($delete_form['entity']) ) {
         $single_item = TRUE;
         // Retrieve the entity being deleted from the form.
-        $parent_entity = $delete_form['entity']($form_copy);
+        $parent_entity = $delete_form['entity']($form_copy, $form_state_copy);
         // Get the entity's ID.
         $id = $parent_entity->{$parent_entity_info['entity keys']['id']};
         $bundle = !empty($parent_entity_info['entity keys']['bundle'])
@@ -50,7 +51,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $single_item = FALSE;
         $child_entities = array();
         // Get the entities from the form.
-        $parent_entities = $delete_form['entities']($form_copy);
+        $parent_entities = $delete_form['entities']($form_copy, $form_state_copy);
         $parent_entity_ids = element_children($parent_entities);
         $field_names = array();
         foreach ( $parent_entity_ids as $id ) {
@@ -148,7 +149,9 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $submit_element['#disabled'] = TRUE;
         }
         else {
-          $submit_element['#value'] .= ' ' . t('and empty referring fields');
+          $submit_element['#suffix'] = t('and empty <strong>all</strong> referring fields.') . ' ' .
+                  ( !empty($submit_element['#suffix']) ? $submit_element['#suffix'] : '' ) . ' &nbsp; &nbsp; ';
+          $submit_element['#attributes']['title'] = t('Click to delete and empty all referring fields');
           $form['erri_entities_and_field_names'] = array('#type' => 'value', '#value' => $field_names);
           $form['#submit'][] = 'erri_delete_form_submit';
         }
@@ -208,7 +211,8 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
             // so that array arithmatic doesn't stomp on array elements.
             $query->addExpression("CONCAT($table.entity_type, ':', $table.bundle, ':', $table.entity_id, ':', $table.revision_id)", 'pk');
             $query->addExpression("'revision'", 'revision');
-            if ( !empty($entity_info[$field['settings']['target_type']]['revision table']) &&
+            if ( !empty($field['settings']['target_type']) &&
+                    !empty($entity_info[$field['settings']['target_type']]['revision table']) &&
                     !empty($entity_info[$field['settings']['target_type']]['entity keys']['id']) &&
                     !empty($entity_info[$field['settings']['target_type']]['entity keys']['revision']) &&
                     db_field_exists($entity_info[$field['settings']['target_type']]['revision table'], 'timestamp')) {

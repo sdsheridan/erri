@@ -104,7 +104,7 @@ function erri_taxonomy_term_entities($form) {
 
 /**
  * Term-admin delete form handler.
- * @param array $form
+ * @param array $form The term admin form array.
  * @return bool TRUE if this is the delete form of the term-admin form.
  */
 function erri_taxonomy_term_delete($form) {
