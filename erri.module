@@ -247,12 +247,12 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
 
 /**
  * Helper function to get all reference fields.
- * @staticvar array $referece_fields All reference fields.
+ * @staticvar array $reference_fields All reference fields.
  * @return array All reference fields.
  */
 function erri_get_reference_fields() {
-  static $referece_fields = array();
-  if ( empty($referece_fields) ) {
+  static $reference_fields = array();
+  if ( empty($reference_fields) ) {
     $reference_fields = field_read_fields(array('type' => 'entityreference'));
     $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
     // Allow other modules to add to the reference fields.
