@@ -100,7 +100,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $submit_element = &$form['actions']['submit'];
         }
         // Start by assuming no fields are required and the current user has edit
-        // permissions.  Then evaulate field-by-field and for each referenced entity,
+        // permissions.  Then evaluate field-by-field and for each referenced entity,
         // and change accordingly (done in the called functions, so vars passed by
         // reference).
         $has_required = FALSE;
@@ -109,7 +109,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
           if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete %title', array('%title' => $title)), PASS_THROUGH);
-            $description_element = '<div class="erri">' . t('%title cannot be deleted because it is referred to by:',
+            $description_element = '<div class="erri">' . t('%title cannot be deleted because it is referenced by:',
                     array('%title' => $title));
           }
           else {
@@ -121,7 +121,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           $list = array();
           foreach ( $child_entities as $parent_entity => $children ) {
             $sub_list = _erri_list_children($children, $has_required, $has_edit_permissions);
-            $list[] = t('!entity is referred to by:', array('!entity' => $parent_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
+            $list[] = t('!entity is referenced by:', array('!entity' => $parent_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
           if ( $has_required || !$has_edit_permissions ) {
             drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => $title)));
@@ -129,7 +129,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
                     array('@title' => $title));
           }
           else {
-            $description_element .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emtpying referring fields:',
+            $description_element .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emptying referring fields:',
                     array('@title' => $title));
           }
         }
@@ -193,7 +193,7 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
         foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
           $column_name = current($column);
           // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
-          // so that array arithmatic doesn't stomp on array elements.
+          // so that array arithmetic doesn't stomp on array elements.
           $child_entities[$field['field_name']] += db_query("SELECT *, "
                   . "CONCAT(entity_type, ':', bundle, ':', entity_id, ':', revision_id) AS pk, "
                   . "'current' AS revision FROM {{$table}} "
@@ -208,7 +208,7 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
                     ->condition($column_name, $id)
                     ->condition('deleted', 0);
             // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
-            // so that array arithmatic doesn't stomp on array elements.
+            // so that array arithmetic doesn't stomp on array elements.
             $query->addExpression("CONCAT($table.entity_type, ':', $table.bundle, ':', $table.entity_id, ':', $table.revision_id)", 'pk');
             $query->addExpression("'revision'", 'revision');
             if ( !empty($field['settings']['target_type']) &&
@@ -253,8 +253,17 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
 function erri_get_reference_fields() {
   static $reference_fields = array();
   if ( empty($reference_fields) ) {
-    $reference_fields = field_read_fields(array('type' => 'entityreference'));
-    $reference_fields += field_read_fields(array('type' => 'taxonomy_term_reference'));
+
+    // Get only entity and taxonomy reference fields
+    $reference_fields = array_filter(field_info_field_map(), function ($field) {
+      return $field['type'] == 'entityreference' || $field['type'] == 'taxonomy_term_reference';
+    });
+
+    // Retrieve field info for each field
+    array_walk($reference_fields, function(&$field, $key) {
+      return $field = field_info_field($key);
+    });
+
     // Allow other modules to add to the reference fields.
     foreach ( module_implements('erri_reference_fields') as $module ) {
       $function = $module . '_erri_reference_fields';
