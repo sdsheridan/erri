@@ -1,7 +1,7 @@
 <?php
 /**
  * @file
- * Module main file
+ * Module main file.
  */
 
 /**
@@ -70,7 +70,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           }
           else {
             // Keep the field names to avoid redoing the work in the delete submit handler
-            // if the entity can indeed be deleted (all children have the parent as optional.
+            // if the entity can indeed be deleted (all children have the parent as optional).
             $field_names[$id] = array_keys($child_entities[$group_index]);
           }
         }
@@ -254,12 +254,12 @@ function erri_get_reference_fields() {
   static $reference_fields = array();
   if ( empty($reference_fields) ) {
 
-    // Get only entity and taxonomy reference fields
+    // Get only entity and taxonomy reference fields.
     $reference_fields = array_filter(field_info_field_map(), function ($field) {
       return $field['type'] == 'entityreference' || $field['type'] == 'taxonomy_term_reference';
     });
 
-    // Retrieve field info for each field
+    // Retrieve field info for each field.
     array_walk($reference_fields, function(&$field, $key) {
       return $field = field_info_field($key);
     });
