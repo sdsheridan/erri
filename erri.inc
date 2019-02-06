@@ -12,29 +12,35 @@ function erri_erri_info() {
     'node_delete_confirm' => array(
       'entity' => '_erri_get_node_entity',
       'target_type' => 'node',
+      'candidates' => '_erri_get_candidates',
     ),
     'node_admin_content' => array(
       'entities' => '_erri_get_node_entities',
       'target_type' => 'node',
       'is_delete_form' => '_erri_is_node_entities_delete',
+      'candidates' => '_erri_get_candidates',
     ),
     'user_cancel_confirm_form' => array(
       'entity' => '_erri_get_user_entity',
       'target_type' => 'user',
+      'candidates' => '_erri_get_candidates',
     ),
     'user_multiple_cancel_confirm' => array(
       'entities' => '_erri_get_user_entities',
       'target_type' => 'user',
+      'candidates' => '_erri_get_candidates',
     ),
     'taxonomy_form_term' => array(
       'entity' => '_erri_get_taxonomy_term_entity',
       'target_type' => 'taxonomy_term',
       'is_delete_form' => '_erri_is_taxonomy_term_delete',
+      'candidates' => '_erri_get_candidates',
     ),
     'taxonomy_manager_form' => array(
       'entities' => '_erri_get_taxonomy_term_entities',
       'target_type' => 'taxonomy_term',
       'is_delete_form' => '_erri_is_taxonomy_term_delete',
+      'candidates' => '_erri_get_candidates',
     ),
   );
 }
@@ -64,6 +70,49 @@ function _erri_get_node_entities($form) {
  */
 function _erri_is_node_entities_delete($form) {
   return !empty($form['operation']['#value']) && $form['operation']['#value'] == 'delete';
+}
+
+/**
+ * Get candidates for replacements for nodes, taxonomy terms, and users.
+ * @param string $entity_type The type of entity - 'node', 'taxonomy_term', or 'user'.
+ * @param string $bundle For nodes, the node type; for taxonomy terms, the vocabulary; for users, empty string.
+ * @param array $exclude_ids Array of ids of the entities being deleted.
+ * @return array An array of options to replace the entity being deleted.
+ */
+function _erri_get_candidates($entity_type, $bundle, $exclude_ids) {
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', $entity_type);
+  switch ( $entity_type ) {
+    case 'node' :
+      $query->entityCondition('bundle', $bundle)
+              ->propertyCondition('nid', $exclude_ids, 'NOT IN')
+              ->propertyCondition('status', 1)
+              ->propertyOrderBy('title');
+      $item_id = 'nid';
+      break;
+    case 'taxonomy_term' :
+      $vocab = taxonomy_vocabulary_machine_name_load($bundle);
+      $query->propertyCondition('vid', $vocab->vid)
+              ->propertyCondition('tid', $exclude_ids, 'NOT IN')
+              ->propertyOrderBy('weight');
+      $item_id = 'tid';
+      break;
+    case 'user' :
+      $query->propertyCondition('uid', $exclude_ids, 'NOT IN')
+              ->propertyOrderBy('name');
+      $item_id = 'uid';
+      break;
+  }
+  $result = $query->execute();
+  $options = array();
+  if ( !empty($result[$entity_type]) ) {
+    $function = $entity_type . '_load_multiple';
+    $items = $function(array_keys($result[$entity_type]));
+    foreach ( $items as $item ) {
+      $options[$item->$item_id] = entity_label($entity_type, $item) . ' (' . $item_id . ': ' . $item->$item_id . ')';
+    }
+  }
+  return array_map('filter_xss', $options);
 }
 
 /**

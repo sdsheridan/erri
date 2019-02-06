@@ -14,21 +14,36 @@ if the current user has view permissions on the referring entities and fields,
 or if not, just that there is referring content, and either
 
 1.  disables the delete button on the form if any of the referring fields are
-    required, or where the current user does not have update permissions on
-    either the referring entities or referring fields, or
+    required and the user does not have permissions to bypass required field
+    settings and does not have permissions to mass-change a reference target
+    (see permissions below), or where the current user does not have update
+    permissions on either the referring entities or referring fields, or
 2.  where the referring fields are all optional and the current user has
     permissions to update both the referring entities and the referring field on
-    those entities, changes the text of the delete button to indicate all
-    referring fields will be set to empty.
+    those entities or has permissions to either bypass required contraints or
+    can mass-change targets, changes the text of the delete button to indicate
+    all referring fields will be set to empty or changed to a new target.
 
 Required fields are noted with a red asterisk in the list of referrers, and in
 the case where a user has insufficient permissions to update non-required
 fields, the user is informed. Previous revisions are also checked.
 
 Note that this module currently implements 'Restrict' referential integrity
-where any of the referring fields' settings are set as 'Required', and 'Set
-Null' if all of the referring fields' settings are set as not required.
-'Cascade' is not (yet) implemented.
+where any of the referring fields' settings are set as 'Required', 'Set Null' if
+all of the referring fields' settings are set as not required or the user has
+permissions to bypass required constraints, and a mass-target-change upon delete
+if the user has permissions.  'Cascade' is not (yet) implemented.
+
+Permissions
+~~~~~~~~~~~
+
+The module has three special permissions, set as normal in the normal
+Permissions form.  One is to bypass the required constraints for revisions, so
+that users with this permission can still set referring fields to empty even if
+they are required in revisions.  A second permission does that same for current
+versions of content.  The third permission allows users to select a new target
+for referring fields to point to when an entity is deleted.  These permissions
+should be granted only to trusted roles.
 
 API
 ~~~
@@ -81,5 +96,7 @@ example:
 
 Installation
 ~~~~~~~~~~~~
-Install this module like any other, and activate it.  There's nothing else to
-do.  The module will begin working immediately.
+Install this module like any other, and activate it.  The module will begin
+working immediately.  Grant permissions as required to trusted roles if there is
+a need to bypass required field constraints, or to allow certain users to make
+mass changes to targets upon deleting entities.

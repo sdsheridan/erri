@@ -5,6 +5,42 @@
  */
 
 /**
+ * Implements hook_permission().
+ */
+function erri_permission() {
+  return array(
+    'erri:bypass_revisions' => array(
+      'title' => t('Bypass revision referential integrity restrict'),
+      'description' => t('Allows users to still delete entities if they are referenced '
+              . 'by required fields of revisions of other entities.  <em>Be careful in granting this permission, '
+              . 'as it can lead to lack of logical referenital integrity if revisions are '
+              . 'restored.  Such revisions would have required fields empty that would have '
+              . 'referred to deleted entities.</em>'),
+      'restrict access' => TRUE,
+    ),
+    'erri:bypass_current' => array(
+      'title' => t('Bypass current version referential integrity restrict'),
+      'description' => t('Allows users to still delete entities if they are referred '
+              . 'to by required fields in current versions of other entities.  <em>Be very careful in granting '
+              . 'this permission, as it can lead to lack of logical referenital integrity '
+              . 'in current data.  Current data would have required fields empty that '
+              . 'would have referred to deleted entities.</em>'),
+      'restrict access' => TRUE,
+    ),
+    'erri:change_reference_target' => array(
+      'title' => t('Change all reference targets on entity delete'),
+      'description' => t('Allows users to change the target entity of all references '
+              . 'when deleting entities if they are referred to in other entities, both '
+              . 'current version and all revisions.  <em>Be very careful in granting '
+              . 'this permission, as it will allow the user to make changes to existing '
+              . 'entitites and their revisions that will not be tracked through anything '
+              . 'other than log (watchdog) entries.</em>'),
+      'restrict access' => TRUE,
+    ),
+  );
+}
+
+/**
  * Implements hook_form_alter().  Determine if there are child entities, and act accordingly.
  */
 function erri_form_alter(&$form, &$form_state, $form_id) {
@@ -43,8 +79,18 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $child_entities = erri_get_child_entities($delete_form['target_type'], $id, $bundle);
         // Keep the field names to avoid redoing the work in the delete submit handler
         // if the entity can indeed be deleted (all children have the parent as optional.
-        $field_names = array($id => array_keys($child_entities));
         $title = entity_label($delete_form['target_type'], $parent_entity);
+        $form['erri_parent_info'] = array(
+          '#type' => 'value',
+          '#value' => array($id => array(
+            'parent' => $parent_entity,
+            'id' => $id,
+            'type' => $delete_form['target_type'],
+            'bundle' => $bundle,
+            'title' => $title,
+            'fields' => array_keys($child_entities),
+          ),),
+        );
       }
       // If 'entities' is specified, then this is a multi-entity delete form.
       elseif ( !empty($delete_form['entities']) && function_exists($delete_form['entities']) ) {
@@ -53,14 +99,15 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         // Get the entities from the form.
         $parent_entities = $delete_form['entities']($form_copy, $form_state_copy);
         $parent_entity_ids = element_children($parent_entities);
-        $field_names = array();
+        $form['erri_parent_info'] = array('#type' => 'value', '#value' => array());
         foreach ( $parent_entity_ids as $id ) {
           // Get the full entity via the entity's load function.
           $parent_entity = $parent_entity_info['load hook']($id);
           // Group index is used as a title for a section.
           $uri = entity_uri($delete_form['target_type'], $parent_entity);
           // Ensure unique array index by combining label and uri path.
-          $group_index = l(entity_label($delete_form['target_type'], $parent_entity), $uri['path']);
+          $group_title = entity_label($delete_form['target_type'], $parent_entity);
+          $group_index = l($group_title, $uri['path']);
           $bundle = !empty($parent_entity_info['entity keys']['bundle'])
                   ? $parent_entity->{$parent_entity_info['entity keys']['bundle']}
                   : NULL;
@@ -71,7 +118,14 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           else {
             // Keep the field names to avoid redoing the work in the delete submit handler
             // if the entity can indeed be deleted (all children have the parent as optional).
-            $field_names[$id] = array_keys($child_entities[$group_index]);
+            $form['erri_parent_info']['#value'][$id] = array(
+              'parent' => $parent_entity,
+              'id' => $id,
+              'type' => $delete_form['target_type'],
+              'bundle' => $bundle,
+              'title' => $group_title,
+              'fields' => array_keys($child_entities[$group_index]),
+            );
           }
         }
         $title = strtolower($parent_entity_info['plural label']);
@@ -85,9 +139,11 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           foreach ( $element_trail as $element ) {
             $description_element = &$description_element[$element];
           }
+          $description_outer_element = $element_trail[0];
         }
         else {
           $description_element = &$form['description']['#markup'];
+          $description_outer_element = 'description';
         }
         if ( !empty($delete_form['submit_element']) ) {
           $element_trail = explode('][', $delete_form['submit_element']);
@@ -95,27 +151,22 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           foreach ( $element_trail as $element ) {
             $submit_element = &$submit_element[$element];
           }
+          $submit_outer_element = $element_trail[0];
         }
         else {
           $submit_element = &$form['actions']['submit'];
+          $submit_outer_element = 'actions';
         }
+
         // Start by assuming no fields are required and the current user has edit
         // permissions.  Then evaluate field-by-field and for each referenced entity,
         // and change accordingly (done in the called functions, so vars passed by
         // reference).
-        $has_required = FALSE;
+        $has_required = array('current' => FALSE, 'revision' => FALSE);
         $has_edit_permissions = TRUE;
+        $description_additions = array('top' => '', 'list' => '', 'bottom' => '');
         if ( $single_item ) {
           $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
-          if ( $has_required || !$has_edit_permissions ) {
-            drupal_set_title(t('Cannot delete %title', array('%title' => $title)), PASS_THROUGH);
-            $description_element = '<div class="erri">' . t('%title cannot be deleted because it is referenced by:',
-                    array('%title' => $title));
-          }
-          else {
-            $description_element .= '<div class="erri">' . t('%title cannot be deleted without emptying:',
-                    array('%title' => $title));
-          }
         }
         else {
           $list = array();
@@ -123,39 +174,111 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             $sub_list = _erri_list_children($children, $has_required, $has_edit_permissions);
             $list[] = t('!entity is referenced by:', array('!entity' => $parent_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
-          if ( $has_required || !$has_edit_permissions ) {
-            drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => $title)));
-            $description_element = '<div class="erri">' . t('One or more of the @title cannot be deleted because:',
-                    array('@title' => $title));
-          }
-          else {
-            $description_element .= '<div class="erri">' . t('One or more of the @title cannot be deleted without emptying referring fields:',
-                    array('@title' => $title));
-          }
         }
 
-        $description_element .= '<ul class="erri-referrers"><li>' . implode('</li><li>', $list) . '</li></ul>';
-        if ( $has_required || !$has_edit_permissions ) {
-          if ( $has_required ) {
-            $description_element .= '<p><span class="form-required" title="' .
-                    t('This field is required.') . '">*</span> ' .
-                    t('Required field - cannot be left blank.') . '</p>';
-          }
-          if ( !$has_edit_permissions ) {
-            $description_element .= '<p>' .
+        $description_additions['list'] = '<ul class="erri-referrers"><li>' . implode('</li><li>', $list) . '</li></ul>';
+        if ( $has_required['current'] || $has_required['revision'] ) {
+          $description_additions['list'] .= '<p><span class="form-required" title="' .
+                  t('This field is required.') . '">*</span> ' .
+                  t('Required field - cannot be left blank.') . '</p>';
+        }
+
+        // Assemble final messages and determine if the delete button should be disabled.
+        switch ( TRUE ) {
+          case !$has_edit_permissions :
+            $description_additions['bottom'] = '<p>' .
                     t('You do not have sufficient permissions on all referring items and / or fields to be able to delete this entity.') .
                     '</p>';
-          }
-          $submit_element['#disabled'] = TRUE;
+          case $has_required['current'] && !user_access('erri:bypass_current') && !user_access('erri:change_reference_target') :
+          case $has_required['revision'] && !user_access('erri:bypass_revisions') && !user_access('erri:change_reference_target') :
+            if ( $single_item ) {
+              $description_additions['top'] = t('%title cannot be deleted because it is referenced by:', array('%title' => $title));
+              drupal_set_title(t('Cannot delete %title', array('%title' => $title)), PASS_THROUGH);
+            }
+            else {
+              $description_additions['top'] = t('One or more of the @title cannot be deleted because:', array('@title' => $title));
+              drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => $title)));
+            }
+            $submit_element['#disabled'] = TRUE;
+            break;
+
+          // If we get this far, then there are no 'required' fields referencing the entity / entities to be deleted, or
+          // there are, but the user either has required bypass permission(s) or they have permission to mass-change the
+          // reference target to something else.
+          case user_access('erri:change_reference_target') :
+            // User has permission to make a mass-change, so if there is a function
+            // to determine replacement candidates...
+            if ( !empty($delete_form['candidates']) && function_exists($delete_form['candidates']) ) {
+              // If the current user cannot bypass the 'required' aspect but they have the mass-replacement permission,
+              // then make this field required to delete the entity.
+              $required = $has_required['current'] && !user_access('erri:bypass_current') ||
+                      $has_required['revision'] && !user_access('erri:bypass_revisions');
+              // Get replacement candidates.
+              $replacement_candidates = array(0 => $required ? t('- Select a replacement -') : t('Nothing - set referring fields to empty')) +
+                      $delete_form['candidates']($delete_form['target_type'], $bundle, $single_item ? array($id) : $parent_entity_ids);
+              $form[$description_outer_element]['#weight'] = 10;
+              $form['erri_new_target'] = array(
+                '#type' => 'select',
+                '#title' => t('Replace all with'),
+                '#size' => 1,
+                '#options' => $replacement_candidates,
+                '#required' => $required,
+                '#description' => t('Choose a replacement option to replace <strong>ALL</strong> references in the listed items.  '
+                        . 'Once the change is made, <strong>IT CANNOT BE UNDONE!</strong>'),
+                '#element_validate' => $required ? array('erri_new_target_validate') : array(),
+                '#weight' => 11,
+              );
+              $form[$submit_outer_element]['#weight'] = 100;
+            }
+
+          default:
+            if ( $single_item ) {
+              $description_additions['top'] = t('%title cannot be deleted without !action:', array(
+                '%title' => $title,
+                '!action' => empty($replacement_candidates)
+                        ? t('emptying')
+                        : ( ( empty($required) ? t('emptying or ') : '' ) . t('changing the referrenced item for') )
+              ));
+            }
+            else {
+              $description_additions['top'] = t('One or more of the @title cannot be deleted without !action referring fields:', array(
+                '@title' => $title,
+                '!action' => empty($replacement_candidates)
+                        ? t('emptying')
+                        : ( ( empty($required) ? t('emptying or ') : '' ) . t('changing the referrenced item for') )
+              ));
+            }
+            if ( $has_required['current'] || $has_required['revision'] ) {
+              // If we get this far, then the user has permissions to bypass restrict
+              // referrential integrity or can do a mass change, so warn them nonetheless
+              // that they're about to make irreversable changes.
+              $description_additions['bottom'] = '<p style="color:red;">' . t('<strong>WARNING: </strong> Proceeding to delete !things will '
+                      . 'set all referring fields to !what, including ALL required fields in ALL revisions, both current and prior. '
+                      . '<strong>This cannot be undone!</strong>',
+                      array(
+                        '!things' => $single_item ? t('this entity') : t('these entities'),
+                        '!what' => empty($replacement_candidates)
+                                ? t('empty')
+                                : ( ( empty($required) ? t('empty or ') : '' ) . t('the new referrenced item (what you choose in "Replace all with" below)') )
+                      )) . '</p>';
+            }
+            $submit_element['#suffix'] = t('and !action <strong>all</strong> referring fields.', array(
+                    '!action' => empty($replacement_candidates)
+                            ? t('empty')
+                            : ( ( empty($required) ? t('empty or ') : '' ) . t('change the referrenced item for') )
+                    )) . ' ' .
+                    ( !empty($submit_element['#suffix']) ? $submit_element['#suffix'] : '' ) . ' &nbsp; &nbsp; ';
+            $submit_element['#attributes']['title'] = t('Click to delete !things and !action all referring fields', array(
+                    '!things' => $single_item ? t('this entity') : t('these entities'),
+                    '!action' => empty($replacement_candidates)
+                            ? t('empty')
+                            : ( ( empty($required) ? t('empty or ') : '' ) . t('change the referrenced item for') ),
+            ));
+            $form['#submit'][] = 'erri_delete_form_submit';
+            break;
         }
-        else {
-          $submit_element['#suffix'] = t('and empty <strong>all</strong> referring fields.') . ' ' .
-                  ( !empty($submit_element['#suffix']) ? $submit_element['#suffix'] : '' ) . ' &nbsp; &nbsp; ';
-          $submit_element['#attributes']['title'] = t('Click to delete and empty all referring fields');
-          $form['erri_entities_and_field_names'] = array('#type' => 'value', '#value' => $field_names);
-          $form['#submit'][] = 'erri_delete_form_submit';
-        }
-        $description_element .= '</div>';
+        $description_element = ( empty($submit_element['#disabled']) ? $description_element : '' ) . '<div class="erri">' .
+                implode('', $description_additions) . '</div>';
         $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
       }
     }
@@ -163,7 +286,78 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
 }
 
 /**
- * Assemble all child entities of a parent entity for referential integrity check.
+ * Validate form element.
+ */
+function erri_new_target_validate($element, &$form_state) {
+  $value = $element['#value'];
+  if ( !is_numeric($value) || intval($value) != $value || $value <= 0 ) {
+    form_error($element, t('%name must be specified.', array(
+      '%name' => $element['#title'],
+    )));
+  }
+}
+
+/**
+ * Additional submit handler to set null target IDs when the referring fields do
+ * not require a value or change to an alternate entity, and the user has decided
+ * to delete the referred-to entity anyway.
+ * @param array $form The form render array.
+ * @param array $form_state The state of the form.
+ */
+function erri_delete_form_submit($form, &$form_state) {
+  $reference_fields = erri_get_reference_fields();
+  $change_count = array('FIELD_LOAD_CURRENT' => 0, 'FIELD_LOAD_REVISION' => 0);
+  $changed_items = array();
+  $replacement = !empty($form_state['values']['erri_new_target']) ? $form_state['values']['erri_new_target'] : FALSE;
+  foreach ( $form_state['values']['erri_parent_info'] as $entity_id => $entity_info ) {
+    foreach ( $entity_info['fields'] as $field_name ) {
+      $field = $reference_fields[$field_name];
+      foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
+        if ( empty($field['storage']['details']['sql'][$revision]) ) {
+          continue;
+        }
+        foreach ( $field['storage']['details']['sql'][$revision] as $table => $column ) {
+          $column_name = current($column);
+          if ( $replacement ) {
+            $result = db_update($table)
+                    ->fields(array($column_name => $replacement))
+                    ->condition($column_name, $entity_id)
+                    ->execute();
+          }
+          else {
+            $result = db_delete($table)->condition($column_name, $entity_id)->execute();
+          }
+          if ( $result ) {
+            $change_count[$revision] += $result;
+            $changed_items[] = t('Field %field (!version) !action where referenced entity was @type %title (ID: !id) - !count changed.',
+                    array(
+                      '%field' => $field_name,
+                      '!version' => $revision == 'FIELD_LOAD_CURRENT' ? t('current version') : t('revisions'),
+                      '!action' => $replacement
+                              ? t('changed to %item (ID: !id)', array(
+                                      '%item' => $form['erri_new_target']['#options'][$replacement],
+                                      '!id' => $replacement,
+                                ))
+                              : t('set to empty'),
+                      '@type' => $entity_info['type'] == 'node' ? $entity_info['bundle'] : $entity_info['type'],
+                      '%title' => $entity_info['title'],
+                      '!id' => $entity_id,
+                      '!count' => $result,
+                    ));
+          }
+        }
+      }
+    }
+  }
+  drupal_flush_all_caches();
+  drupal_set_message(format_plural(max($change_count), 'One reference !action.', '@count references !action.',
+          array('!action' => $replacement ? t('changed') : t('emptied'))));
+  watchdog('erri', '!count field reference targets altered: !list',
+          array( '!count' => array_sum($change_count), '!list' => '<ol><li>' . implode('</li><li>', $changed_items) . '</li></ol>'));
+}
+
+/**
+ * Assemble all child (referring) entities of a parent entity for referential integrity check.
  * @param string $parent_entity_type The entity_type of the parent entity (eg., 'node', 'user', 'taxonomy_term', etc.).
  * @param int $id The ID of the parent entity.
  * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
@@ -184,7 +378,7 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
               $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
               // ...the field is in fact being used, and...
               !empty($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) && (
-              // ...and either the form isn't for an entity type that uses bundles, or...
+              // ...either the form isn't for an entity type that uses bundles, or...
               empty($bundle) || empty($field['settings']['handler_settings']['target_bundles']) ||
               // ...the entity's bundle is one of the field's target bundles...
               is_array($field['settings']['handler_settings']['target_bundles']) &&
@@ -253,17 +447,14 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
 function erri_get_reference_fields() {
   static $reference_fields = array();
   if ( empty($reference_fields) ) {
-
     // Get only entity and taxonomy reference fields.
     $reference_fields = array_filter(field_info_field_map(), function ($field) {
       return $field['type'] == 'entityreference' || $field['type'] == 'taxonomy_term_reference';
     });
-
     // Retrieve field info for each field.
     array_walk($reference_fields, function(&$field, $key) {
       return $field = field_info_field($key);
     });
-
     // Allow other modules to add to the reference fields.
     foreach ( module_implements('erri_reference_fields') as $module ) {
       $function = $module . '_erri_reference_fields';
@@ -279,8 +470,9 @@ function erri_get_reference_fields() {
 /**
  * Helper function to arrange child entities in an array of strings.
  * @param array $child_entities An array of child entities to be listed.
- * @param bool $has_required Passed by reference, a flag indicating if any of the
- *   listed fields are required fields.
+ * @param bool $has_required Passed by reference, a flag array (keys 'current' and
+ *   'revision') indicating if any of the listed fields are required fields in
+ *   current or revision versions of referring entities.
  * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
  *   current user has permissions to edit all child entities.
  * @return array The list of strings.
@@ -296,21 +488,23 @@ function _erri_list_children($child_entities, &$has_required, &$has_edit_permiss
 
 /**
  * Helper function to specify the wording and link around a reference.
- * @param object $child The child entity with the reference.
+ * @param mixed $child The child entity with the reference if an object, or a custom
+ *   array per the API documentation.
  * @param string $field_name The machine name of the field referencing the child.
- * @param bool $has_required Passed by reference, a flag indicating if any of the
- *   previous listed fields are required fields, and set to TRUE if this field's
- *   instance is required.
+ * @param bool $has_required Passed by reference, a flag array (keys 'current' and
+ *   'revision') indicating if any of the listed fields are required fields in
+ *   current or revision versions of referring entities.
  * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
  *   current user has permissions to edit all child entities.
  * @return string The referencing message.
  */
 function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_permissions) {
   if ( is_array($child) ) {
-    // This is a custom value, as otherwise $child would be an object.
+    // This is a custom value provided through the API, as otherwise $child would be an object.
     if ( !empty($child['#markup']) ) {
       if ( !empty($child['#required']) ) {
-        $has_required |= $child['#required'];
+        $has_required['current'] |= $child['#required'];
+        $has_required['revision'] |= $child['#required'];
       }
       if ( !empty($child['#has_permissions']) ) {
         $has_edit_permissions &= $child['#has_permissions'];
@@ -323,7 +517,8 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
     }
     else {
       watchdog('erri', 'Custom markup not set.', WATCHDOG_ERROR);
-      $has_required = TRUE; // Just set this as a default.
+      $has_required['current'] = TRUE; // Just set this as a default.
+      $has_required['revision'] = TRUE;
       $has_edit_permissions = FALSE;
       return t('something else on the site') . ' <span class="form-required" title="' .
               t('This field is required.') . '">*</span>';
@@ -343,7 +538,8 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
         '@type' => $child->entity_type,
         '@id' => $child->entity_id,
       ), WATCHDOG_ERROR);
-    $has_required = TRUE; // Just set this as a default.
+    $has_required['current'] = TRUE; // Just set this as a default.
+    $has_required['revision'] = TRUE;
     $has_edit_permissions = FALSE;
     return t('something else on the site') . ' <span class="form-required" title="' .
             t('This field is required.') . '">*</span>';
@@ -361,7 +557,7 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
   $required = $field_instance['required'] ? ' <span class="form-required" title="' .
           t('This field is required.') . '">*</span>' : '';
   $reference = t('a field!required in a content item', array('!required' => $required));
-  $has_required |= $field_instance['required'];
+  $has_required[$child->revision] |= $field_instance['required'];
   $has_edit_permissions &= entity_access('update', $child->entity_type, $child_entity) &&
           field_access('update', $field, $child->entity_type, $child_entity);
   if ( entity_access('view', $child->entity_type, $child_entity) &&
@@ -388,30 +584,3 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
   return $reference;
 }
 
-/**
- * Additional submit handler to set null target IDs when the referring fields do
- * not require a value, and the user has decided to delete the referred-to entity
- * anyway.
- * @param array $form The form render array.
- * @param array $form_state The state of the form.
- */
-function erri_delete_form_submit($form, &$form_state) {
-  $reference_fields = erri_get_reference_fields();
-  $rows = 0;
-  foreach ( $form_state['values']['erri_entities_and_field_names'] as $entity_id => $field_names ) {
-    foreach ( $field_names as $field_name ) {
-      $field = $reference_fields[$field_name];
-      foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
-        if ( empty($field['storage']['details']['sql'][$revision]) ) {
-          continue;
-        }
-        foreach ( $field['storage']['details']['sql'][$revision] as $table => $column ) {
-          $column_name = current($column);
-          $rows += db_delete($table)->condition($column_name, $entity_id)->execute();
-        }
-      }
-    }
-  }
-  drupal_flush_all_caches();
-  drupal_set_message(format_plural($rows, 'One reference emptied.', '@count references emptied.'));
-}
