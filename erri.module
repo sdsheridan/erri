@@ -214,7 +214,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
               $required = $has_required['current'] && !user_access('erri:bypass_current') ||
                       $has_required['revision'] && !user_access('erri:bypass_revisions');
               // Get replacement candidates.
-              $replacement_candidates = array(0 => $required ? t('- Select a replacement -') : t('Nothing - set referring fields to empty')) +
+              $replacement_candidates = ( $required ? array() : array(0 => t('Nothing - set referring fields to empty')) ) +
                       $delete_form['candidates']($delete_form['target_type'], $bundle, $single_item ? array($id) : $parent_entity_ids);
               $form[$description_outer_element]['#weight'] = 10;
               $form['erri_new_target'] = array(
@@ -334,9 +334,8 @@ function erri_delete_form_submit($form, &$form_state) {
                       '%field' => $field_name,
                       '!version' => $revision == 'FIELD_LOAD_CURRENT' ? t('current version') : t('revisions'),
                       '!action' => $replacement
-                              ? t('changed to %item (ID: !id)', array(
+                              ? t('changed to %item', array(
                                       '%item' => $form['erri_new_target']['#options'][$replacement],
-                                      '!id' => $replacement,
                                 ))
                               : t('set to empty'),
                       '@type' => $entity_info['type'] == 'node' ? $entity_info['bundle'] : $entity_info['type'],
