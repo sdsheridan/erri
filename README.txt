@@ -32,7 +32,8 @@ Note that this module currently implements 'Restrict' referential integrity
 where any of the referring fields' settings are set as 'Required', 'Set Null' if
 all of the referring fields' settings are set as not required or the user has
 permissions to bypass required constraints, and a mass-target-change upon delete
-if the user has permissions.  'Cascade' is not (yet) implemented.
+if the user has permissions.  'Cascade' is not (yet) implemented.  Changes are
+recorded and can be seen in the "Recent Log Messages" report.
 
 Permissions
 ~~~~~~~~~~~
