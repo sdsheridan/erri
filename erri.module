@@ -216,19 +216,21 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
               // Get replacement candidates.
               $replacement_candidates = ( $required ? array() : array(0 => t('Nothing - set referring fields to empty')) ) +
                       $delete_form['candidates']($delete_form['target_type'], $bundle, $single_item ? array($id) : $parent_entity_ids);
-              $form[$description_outer_element]['#weight'] = 10;
-              $form['erri_new_target'] = array(
-                '#type' => 'select',
-                '#title' => t('Replace all with'),
-                '#size' => 1,
-                '#options' => $replacement_candidates,
-                '#required' => $required,
-                '#description' => t('Choose a replacement option to replace <strong>ALL</strong> references in the listed items.  '
-                        . 'Once the change is made, <strong>IT CANNOT BE UNDONE!</strong>'),
-                '#element_validate' => $required ? array('erri_new_target_validate') : array(),
-                '#weight' => 11,
-              );
-              $form[$submit_outer_element]['#weight'] = 100;
+              if ( !empty($replacement_candidates) ) {
+                $form[$description_outer_element]['#weight'] = 10;
+                $form['erri_new_target'] = array(
+                  '#type' => 'select',
+                  '#title' => t('Replace all with'),
+                  '#size' => 1,
+                  '#options' => $replacement_candidates,
+                  '#required' => $required,
+                  '#description' => t('Choose a replacement option to replace <strong>ALL</strong> references in the listed items.  '
+                          . 'Once the change is made, <strong>IT CANNOT BE UNDONE!</strong>'),
+                  '#element_validate' => $required ? array('erri_new_target_validate') : array(),
+                  '#weight' => 11,
+                );
+                $form[$submit_outer_element]['#weight'] = 100;
+              }
             }
 
           default:
