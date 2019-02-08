@@ -175,7 +175,6 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             $list[] = t('!entity is referenced by:', array('!entity' => $parent_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
         }
-
         $description_additions['list'] = '<ul class="erri-referrers"><li>' . implode('</li><li>', $list) . '</li></ul>';
         if ( $has_required['current'] || $has_required['revision'] ) {
           $description_additions['list'] .= '<p><span class="form-required" title="' .
@@ -202,7 +201,8 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             $submit_element['#disabled'] = TRUE;
             break;
 
-          // If we get this far, then there are no 'required' fields referencing the entity / entities to be deleted, or
+          // If we get this far, then the current user has edit permissions on all referring entities and fields,
+          // and there are no 'required' fields referencing the entity / entities to be deleted, or
           // there are, but the user either has required bypass permission(s) or they have permission to mass-change the
           // reference target to something else.
           case user_access('erri:change_reference_target') :
