@@ -83,7 +83,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $form['erri_parent_info'] = array(
           '#type' => 'value',
           '#value' => array($id => array(
-            'parent' => $parent_entity,
+            'entity' => $parent_entity,
             'id' => $id,
             'type' => $delete_form['target_type'],
             'bundle' => $bundle,
@@ -116,10 +116,10 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
             unset($child_entities[$group_index]);
           }
           else {
-            // Keep the field names to avoid redoing the work in the delete submit handler
+            // Keep the entity info and field names to avoid redoing the work in the delete submit handler
             // if the entity can indeed be deleted (all children have the parent as optional).
             $form['erri_parent_info']['#value'][$id] = array(
-              'parent' => $parent_entity,
+              'entity' => $parent_entity,
               'id' => $id,
               'type' => $delete_form['target_type'],
               'bundle' => $bundle,
@@ -308,7 +308,7 @@ function erri_new_target_validate($element, &$form_state) {
  */
 function erri_delete_form_submit($form, &$form_state) {
   $reference_fields = erri_get_reference_fields();
-  $change_count = array('FIELD_LOAD_CURRENT' => 0, 'FIELD_LOAD_REVISION' => 0);
+  $fields_change_count = array('FIELD_LOAD_CURRENT' => 0, 'FIELD_LOAD_REVISION' => 0);
   $changed_items = array();
   $replacement = !empty($form_state['values']['erri_new_target']) ? $form_state['values']['erri_new_target'] : FALSE;
   foreach ( $form_state['values']['erri_parent_info'] as $entity_id => $entity_info ) {
@@ -330,7 +330,7 @@ function erri_delete_form_submit($form, &$form_state) {
             $result = db_delete($table)->condition($column_name, $entity_id)->execute();
           }
           if ( $result ) {
-            $change_count[$revision] += $result;
+            $fields_change_count[$revision] += $result;
             $changed_items[] = t('Field %field (!version) !action where referenced entity was @type %title (ID: !id) - !count changed.',
                     array(
                       '%field' => $field_name,
@@ -350,11 +350,31 @@ function erri_delete_form_submit($form, &$form_state) {
       }
     }
   }
+  // Now allow other modules to react to the entity delete with possible replacement.
+  $other_changes_count = 0;
+  foreach ( module_implements('erri_delete_entities') as $module ) {
+    $funtion = $module . '_erri_delete_entities';
+    $result = $funtion($form_state['values']['erri_parent_info'], $replacement);
+    if ( !empty($result['change_count']) && intval($result['change_count']) == $result['change_count'] &&
+              $result['change_count'] > 0 ) {
+      $other_changes_count += $result['change_count'];
+    }
+    if ( !empty($result['changed_items']) && is_array($result['changed_items']) ) {
+      foreach ( $result['changed_items'] as $item ) {
+        if ( is_string($item) ) {
+          $changed_items[] = filter_xss($item);
+        }
+      }
+    }
+  }
   drupal_flush_all_caches();
-  drupal_set_message(format_plural(max($change_count), 'One reference !action.', '@count references !action.',
+  drupal_set_message(format_plural(max($fields_change_count) + $other_changes_count, 'One reference !action.', '@count references !action.',
           array('!action' => $replacement ? t('changed') : t('emptied'))));
-  watchdog('erri', '!count field reference targets altered: !list',
-          array( '!count' => array_sum($change_count), '!list' => '<ol><li>' . implode('</li><li>', $changed_items) . '</li></ol>'));
+  watchdog('erri', '!count field reference !andother targets altered: !list', array(
+    '!count' => array_sum($fields_change_count) + $other_changes_count,
+    '!andother' => $other_changes_count > 0 ? t('and other module reference') : '',
+    '!list' => '<ol><li>' . implode('</li><li>', $changed_items) . '</li></ol>',
+  ));
 }
 
 /**

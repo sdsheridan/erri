@@ -153,6 +153,45 @@ function hook_erri_reference_check($parent_entity_type, $id, $bundle = NULL) {
   }
 }
 
+/**
+ * Allow custom modules to react to the deletion of entities, with the possibility of referring fields
+ * being updated to point to another entity.
+ * @param array $entities The array of entities keyed on entity ID that were deleted.  Each entry of this array
+ *   is an array itself with the following key => value pairs:
+ *   'entity' => the full entity itself;
+ *   'id' => the id of the entity (same as the key of the full array);
+ *   'type' => the type of the entity (i.e., node, user, taxonomy_term, etc.);
+ *   'bundle' => the bundle of the entity, if it has bundles;
+ *   'title' => the human-readable title of the entity;
+ *   'fields' => an array of field names that referred to this entity.
+ * @param int $replacement The id of the entity that replaced the deleted entities, or FALSE if no replacement was
+ *   specified.
+ * @return array An array of arrays, structured as follows:
+ *   'change_count' => int The number of changes (updates or deletes) that your module made to your modules data.
+ *   'changed_items' => array An array of strings that should be concatenated to the logging messages that will be put
+ *         into the watchdog log.
+ */
+function hook_erri_delete_entities($entities, $replacement) {
+  $result = array(
+    'change_count' => 0,
+    'changed_items' => array(),
+  );
+  foreach ( $entities as $id => $entity_info ) {
+    $type = $entity_info['type'];
+    $bundle = $entity_info['bundle'];
+    if ( $type == 'entity_type_used_in_my_module' && $bundle == 'bundle_type_used_in_my_module' ) {
+      if ( $replacement ) {
+        $result['change_count'] += mymodule_function_to_update($id, $replacement);
+        $result['changed_items'][] = t('My log message about updating my tables.');
+      }
+      else {
+        $result['change_count'] += mymodule_function_to_handle_delete($id);
+        $result['changed_items'][] = t('My log message about deleting the entity from my tables.');
+      }
+    }
+  }
+  return $result;
+}
 
 /**
  * @} End of "addtogroup hooks".
