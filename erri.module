@@ -41,7 +41,7 @@ function erri_permission() {
 }
 
 /**
- * Implements hook_form_alter().  Determine if there are child entities, and act accordingly.
+ * Implements hook_form_alter().  Determine if there are referring entities, and act accordingly.
  */
 function erri_form_alter(&$form, &$form_state, $form_id) {
   // Get a list of all delete forms via hook_erri_info().
@@ -60,7 +60,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
   // If the current form is a delete form...
   if ( !empty($delete_forms[$form_id]) ) {
     $delete_form = &$delete_forms[$form_id];
-    $parent_entity_info = entity_get_info($delete_form['target_type']);
+    $target_entity_info = entity_get_info($delete_form['target_type']);
     $form_copy = $form; // Keep the original form array 'safe'.
     $form_state_copy = $form_state; // Keep the original form_state array 'safe'.
     // ...and this is the delete version of the form for forms that serve multiple purposes...
@@ -70,68 +70,73 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
       if ( !empty($delete_form['entity']) && function_exists($delete_form['entity']) ) {
         $single_item = TRUE;
         // Retrieve the entity being deleted from the form.
-        $parent_entity = $delete_form['entity']($form_copy, $form_state_copy);
+        $target_entity = $delete_form['entity']($form_copy, $form_state_copy);
         // Get the entity's ID.
-        $id = $parent_entity->{$parent_entity_info['entity keys']['id']};
-        $bundle = !empty($parent_entity_info['entity keys']['bundle'])
-                ? $parent_entity->{$parent_entity_info['entity keys']['bundle']}
+        $id = $target_entity->{$target_entity_info['entity keys']['id']};
+        $bundle = !empty($target_entity_info['entity keys']['bundle'])
+                ? $target_entity->{$target_entity_info['entity keys']['bundle']}
                 : NULL;
-        $child_entities = erri_get_child_entities($delete_form['target_type'], $id, $bundle);
+        $referring_entities = erri_get_referring_entities($delete_form['target_type'], $id, $bundle);
         // Keep the field names to avoid redoing the work in the delete submit handler
-        // if the entity can indeed be deleted (all children have the parent as optional.
-        $title = entity_label($delete_form['target_type'], $parent_entity);
-        $form['erri_parent_info'] = array(
+        // if the entity can indeed be deleted (all referring entities have the target as optional).
+        $title = entity_label($delete_form['target_type'], $target_entity);
+        $form['erri_target_info'] = array(
           '#type' => 'value',
           '#value' => array($id => array(
-            'entity' => $parent_entity,
+            'entity' => $target_entity,
             'id' => $id,
             'type' => $delete_form['target_type'],
             'bundle' => $bundle,
             'title' => $title,
-            'fields' => array_keys($child_entities),
+            'fields' => array_keys($referring_entities),
           ),),
         );
       }
       // If 'entities' is specified, then this is a multi-entity delete form.
       elseif ( !empty($delete_form['entities']) && function_exists($delete_form['entities']) ) {
         $single_item = FALSE;
-        $child_entities = array();
+        $referring_entities = array();
         // Get the entities from the form.
-        $parent_entities = $delete_form['entities']($form_copy, $form_state_copy);
-        $parent_entity_ids = element_children($parent_entities);
-        $form['erri_parent_info'] = array('#type' => 'value', '#value' => array());
-        foreach ( $parent_entity_ids as $id ) {
+        $target_entities = $delete_form['entities']($form_copy, $form_state_copy);
+        $target_entity_ids = element_children($target_entities);
+        $form['erri_target_info'] = array('#type' => 'value', '#value' => array());
+        foreach ( $target_entity_ids as $id ) {
           // Get the full entity via the entity's load function.
-          $parent_entity = $parent_entity_info['load hook']($id);
+          $target_entity = $target_entity_info['load hook']($id);
           // Group index is used as a title for a section.
-          $uri = entity_uri($delete_form['target_type'], $parent_entity);
+          $uri = entity_uri($delete_form['target_type'], $target_entity);
           // Ensure unique array index by combining label and uri path.
-          $group_title = entity_label($delete_form['target_type'], $parent_entity);
+          $group_title = entity_label($delete_form['target_type'], $target_entity);
           $group_index = l($group_title, $uri['path']);
-          $bundle = !empty($parent_entity_info['entity keys']['bundle'])
-                  ? $parent_entity->{$parent_entity_info['entity keys']['bundle']}
+          $bundle = !empty($target_entity_info['entity keys']['bundle'])
+                  ? $target_entity->{$target_entity_info['entity keys']['bundle']}
                   : NULL;
-          $child_entities[$group_index] = erri_get_child_entities($delete_form['target_type'], $id, $bundle);
-          if ( empty($child_entities[$group_index]) ) {
-            unset($child_entities[$group_index]);
+          $referring_entities[$group_index] = erri_get_referring_entities($delete_form['target_type'], $id, $bundle);
+          if ( empty($referring_entities[$group_index]) ) {
+            unset($referring_entities[$group_index]);
           }
           else {
             // Keep the entity info and field names to avoid redoing the work in the delete submit handler
-            // if the entity can indeed be deleted (all children have the parent as optional).
-            $form['erri_parent_info']['#value'][$id] = array(
-              'entity' => $parent_entity,
+            // if the entity can indeed be deleted (all referring entities have the target as optional).
+            $form['erri_target_info']['#value'][$id] = array(
+              'entity' => $target_entity,
               'id' => $id,
               'type' => $delete_form['target_type'],
               'bundle' => $bundle,
               'title' => $group_title,
-              'fields' => array_keys($child_entities[$group_index]),
+              'fields' => array_keys($referring_entities[$group_index]),
             );
           }
         }
-        $title = strtolower($parent_entity_info['plural label']);
+        $title = strtolower($target_entity_info['plural label']);
       }
 
-      if ( !empty($child_entities) ) {
+      if ( empty($referring_entities) ) {
+        // Nothing found, so just clean up the form array and return.
+        unset($form['erri_target_info']);
+        return;
+      }
+      else {
         // Get the description and submit elements of the form.
         if ( !empty($delete_form['description_element']) ) {
           $element_trail = explode('][', $delete_form['description_element']);
@@ -166,13 +171,13 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $has_edit_permissions = TRUE;
         $description_additions = array('top' => '', 'list' => '', 'bottom' => '');
         if ( $single_item ) {
-          $list = _erri_list_children($child_entities, $has_required, $has_edit_permissions);
+          $list = _erri_list_referring_entities($referring_entities, $has_required, $has_edit_permissions);
         }
         else {
           $list = array();
-          foreach ( $child_entities as $parent_entity => $children ) {
-            $sub_list = _erri_list_children($children, $has_required, $has_edit_permissions);
-            $list[] = t('!entity is referenced by:', array('!entity' => $parent_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
+          foreach ( $referring_entities as $target_entity => $referring_entities ) {
+            $sub_list = _erri_list_referring_entities($referring_entities, $has_required, $has_edit_permissions);
+            $list[] = t('!entity is referenced by:', array('!entity' => $target_entity)) . '<ul><li>' . implode('</li><li>', $sub_list) . '</li></ul>';
           }
         }
         $description_additions['list'] = '<ul class="erri-referrers"><li>' . implode('</li><li>', $list) . '</li></ul>';
@@ -215,7 +220,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
                       $has_required['revision'] && !user_access('erri:bypass_revisions');
               // Get replacement candidates.
               $replacement_candidates = ( $required ? array() : array(0 => t('Nothing - set referring fields to empty')) ) +
-                      $delete_form['candidates']($delete_form['target_type'], $bundle, $single_item ? array($id) : $parent_entity_ids);
+                      $delete_form['candidates']($delete_form['target_type'], $bundle, $single_item ? array($id) : $target_entity_ids);
               if ( !empty($replacement_candidates) ) {
                 $form[$description_outer_element]['#weight'] = 10;
                 $form['erri_new_target'] = array(
@@ -311,7 +316,7 @@ function erri_delete_form_submit($form, &$form_state) {
   $fields_change_count = array('FIELD_LOAD_CURRENT' => 0, 'FIELD_LOAD_REVISION' => 0);
   $changed_items = array();
   $replacement = !empty($form_state['values']['erri_new_target']) ? $form_state['values']['erri_new_target'] : FALSE;
-  foreach ( $form_state['values']['erri_parent_info'] as $entity_id => $entity_info ) {
+  foreach ( $form_state['values']['erri_target_info'] as $entity_id => $entity_info ) {
     foreach ( $entity_info['fields'] as $field_name ) {
       $field = $reference_fields[$field_name];
       foreach ( array('FIELD_LOAD_CURRENT', 'FIELD_LOAD_REVISION') as $revision ) {
@@ -354,7 +359,7 @@ function erri_delete_form_submit($form, &$form_state) {
   $other_changes_count = 0;
   foreach ( module_implements('erri_delete_entities') as $module ) {
     $funtion = $module . '_erri_delete_entities';
-    $result = $funtion($form_state['values']['erri_parent_info'], $replacement);
+    $result = $funtion($form_state['values']['erri_target_info'], $replacement);
     if ( !empty($result['change_count']) && intval($result['change_count']) == $result['change_count'] &&
               $result['change_count'] > 0 ) {
       $other_changes_count += $result['change_count'];
@@ -378,7 +383,8 @@ function erri_delete_form_submit($form, &$form_state) {
 }
 
 /**
- * Assemble all child (referring) entities of a parent entity for referential integrity check.
+ * Assemble all child (referring) entities of a parent (target) entity for referential integrity check.
+ * @deprecated since version 1.6  - use erri_get_referring_entities instead.
  * @param string $parent_entity_type The entity_type of the parent entity (eg., 'node', 'user', 'taxonomy_term', etc.).
  * @param int $id The ID of the parent entity.
  * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
@@ -386,7 +392,19 @@ function erri_delete_form_submit($form, &$form_state) {
  *   entities referencing, or an empty array if no entities refer to the parent.
  */
 function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
-  $child_entities = array();
+  return erri_get_referring_entities($parent_entity_type, $id, $bundle);
+}
+
+/**
+ * Assemble all referring entities of a target entity for referential integrity check.
+ * @param string $target_entity_type The entity_type of the target entity (eg., 'node', 'user', 'taxonomy_term', etc.).
+ * @param int $id The ID of the target entity.
+ * @param string $bundle The bundle of the target in the case that the target entity type uses bundles.
+ * @return array Entities referring to the target, keyed on the referencing field with sub-arrays of the
+ *   entities referencing, or an empty array if no entities refer to the target.
+ */
+function erri_get_referring_entities($target_entity_type, $id, $bundle = NULL) {
+  $referring_entities = array();
   $reference_fields = erri_get_reference_fields();
   if ( !empty($reference_fields) ) {
     $entity_info = entity_get_info();
@@ -394,9 +412,9 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
       // If it's an entityreference referring to the right entity type, or...
       if ( ( !empty($field['type']) && (
               $field['type'] == 'entityreference' && !empty($field['settings']['target_type']) &&
-              $field['settings']['target_type'] == $parent_entity_type ||
+              $field['settings']['target_type'] == $target_entity_type ||
               // ...it's a taxonomy term reference and we're testing against a taxonomy term, and...
-              $field['type'] == 'taxonomy_term_reference' && $parent_entity_type == 'taxonomy_term' ) &&
+              $field['type'] == 'taxonomy_term_reference' && $target_entity_type == 'taxonomy_term' ) &&
               // ...the field is in fact being used, and...
               !empty($field['storage']['details']['sql']['FIELD_LOAD_CURRENT']) && (
               // ...either the form isn't for an entity type that uses bundles, or...
@@ -404,12 +422,12 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
               // ...the entity's bundle is one of the field's target bundles...
               is_array($field['settings']['handler_settings']['target_bundles']) &&
               in_array($bundle, $field['settings']['handler_settings']['target_bundles']) ) ) ) {
-        $child_entities[$field['field_name']] = array();
+        $referring_entities[$field['field_name']] = array();
         foreach ( $field['storage']['details']['sql']['FIELD_LOAD_CURRENT'] as $table => $column ) {
           $column_name = current($column);
           // Use the CONCAT in the select to ensure a unique primary key and thus index on the array
           // so that array arithmetic doesn't stomp on array elements.
-          $child_entities[$field['field_name']] += db_query("SELECT *, "
+          $referring_entities[$field['field_name']] += db_query("SELECT *, "
                   . "CONCAT(entity_type, ':', bundle, ':', entity_id, ':', revision_id) AS pk, "
                   . "'current' AS revision FROM {{$table}} "
                   . "WHERE $column_name = :id AND deleted = 0", array(':id' => $id))->fetchAllAssoc('pk');
@@ -438,26 +456,26 @@ function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
                       . "$table.entity_type = '{$field['settings']['target_type']}'");
               $query->addField('r', 'timestamp', 'revision_timestamp');
             }
-            $child_entities[$field['field_name']] += $query->execute()->fetchAllAssoc('pk');
+            $referring_entities[$field['field_name']] += $query->execute()->fetchAllAssoc('pk');
           }
         }
-        if ( empty($child_entities[$field['field_name']]) ) {
-          unset($child_entities[$field['field_name']]);
+        if ( empty($referring_entities[$field['field_name']]) ) {
+          unset($referring_entities[$field['field_name']]);
         }
         else {
-          krsort($child_entities[$field['field_name']]);
+          krsort($referring_entities[$field['field_name']]);
         }
       }
     }
   }
   foreach ( module_implements('erri_reference_check') as $module ) {
     $function = $module . '_erri_reference_check';
-    $result = $function($parent_entity_type, $id, $bundle);
+    $result = $function($target_entity_type, $id, $bundle);
     if ( is_array($result) ) {
-      $child_entities += $result;
+      $referring_entities += $result;
     }
   }
-  return $child_entities;
+  return $referring_entities;
 }
 
 /**
@@ -489,19 +507,19 @@ function erri_get_reference_fields() {
 }
 
 /**
- * Helper function to arrange child entities in an array of strings.
- * @param array $child_entities An array of child entities to be listed.
+ * Helper function to arrange referring entities in an array of strings.
+ * @param array $referring_entities An array of referring entities to be listed.
  * @param bool $has_required Passed by reference, a flag array (keys 'current' and
  *   'revision') indicating if any of the listed fields are required fields in
  *   current or revision versions of referring entities.
  * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
- *   current user has permissions to edit all child entities.
+ *   current user has permissions to edit all referring entities.
  * @return array The list of strings.
  */
-function _erri_list_children($child_entities, &$has_required, &$has_edit_permissions) {
-  foreach ( $child_entities as $field_name => $children ) {
-    foreach ( $children as $child ) {
-      $list[] = _erri_get_reference($child, $field_name, $has_required, $has_edit_permissions);
+function _erri_list_referring_entities($referring_entities, &$has_required, &$has_edit_permissions) {
+  foreach ( $referring_entities as $field_name => $entities ) {
+    foreach ( $entities as $entity ) {
+      $list[] = _erri_get_reference($entity, $field_name, $has_required, $has_edit_permissions);
     }
   }
   return $list;
@@ -509,29 +527,29 @@ function _erri_list_children($child_entities, &$has_required, &$has_edit_permiss
 
 /**
  * Helper function to specify the wording and link around a reference.
- * @param mixed $child The child entity with the reference if an object, or a custom
+ * @param mixed $referring_entity The entity with the reference if an object, or a custom
  *   array per the API documentation.
- * @param string $field_name The machine name of the field referencing the child.
+ * @param string $field_name The machine name of the field referencing the referring entity.
  * @param bool $has_required Passed by reference, a flag array (keys 'current' and
  *   'revision') indicating if any of the listed fields are required fields in
  *   current or revision versions of referring entities.
  * @param bool $has_edit_permissions Passed by reference, a flag indicating if the
- *   current user has permissions to edit all child entities.
+ *   current user has permissions to edit all referring entities.
  * @return string The referencing message.
  */
-function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_permissions) {
-  if ( is_array($child) ) {
-    // This is a custom value provided through the API, as otherwise $child would be an object.
-    if ( !empty($child['#markup']) ) {
-      if ( !empty($child['#required']) ) {
-        $has_required['current'] |= $child['#required'];
-        $has_required['revision'] |= $child['#required'];
+function _erri_get_reference($referring_entity, $field_name, &$has_required, &$has_edit_permissions) {
+  if ( is_array($referring_entity) ) {
+    // This is a custom value provided through the API, as otherwise $referring_entity would be an object.
+    if ( !empty($referring_entity['#markup']) ) {
+      if ( !empty($referring_entity['#required']) ) {
+        $has_required['current'] |= $referring_entity['#required'];
+        $has_required['revision'] |= $referring_entity['#required'];
       }
-      if ( !empty($child['#has_permissions']) ) {
-        $has_edit_permissions &= $child['#has_permissions'];
+      if ( !empty($referring_entity['#has_permissions']) ) {
+        $has_edit_permissions &= $referring_entity['#has_permissions'];
       }
-      $reference = $child['#markup'];
-      if ( !empty($child['#required']) ) {
+      $reference = $referring_entity['#markup'];
+      if ( !empty($referring_entity['#required']) ) {
         $reference = '<span class="erri-required-reference">' . $reference . '</span>';
       }
       return $reference;
@@ -545,10 +563,10 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
               t('This field is required.') . '">*</span>';
     }
   }
-  $entity_info = entity_get_info($child->entity_type);
+  $entity_info = entity_get_info($referring_entity->entity_type);
   if ( function_exists($entity_info['load hook']) ) {
     try {
-      $child_entity = $entity_info['load hook']($child->entity_id);
+      $entity = $entity_info['load hook']($referring_entity->entity_id);
     }
     catch ( Exception $e ) {
     }
@@ -556,8 +574,8 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
   else {
     watchdog('erri', 'Load function %function does not exist for @type @id.', array(
         '%function' => $entity_info['load hook'],
-        '@type' => $child->entity_type,
-        '@id' => $child->entity_id,
+        '@type' => $referring_entity->entity_type,
+        '@id' => $referring_entity->entity_id,
       ), WATCHDOG_ERROR);
     $has_required['current'] = TRUE; // Just set this as a default.
     $has_required['revision'] = TRUE;
@@ -566,33 +584,33 @@ function _erri_get_reference($child, $field_name, &$has_required, &$has_edit_per
             t('This field is required.') . '">*</span>';
   }
   if ( !empty($entity_info['entity keys']['bundle']) ) {
-    $type = $child_entity->{$entity_info['entity keys']['bundle']};
-    $type_name = $entity_info['bundles'][$child_entity->{$entity_info['entity keys']['bundle']}]['label'];
+    $type = $entity->{$entity_info['entity keys']['bundle']};
+    $type_name = $entity_info['bundles'][$entity->{$entity_info['entity keys']['bundle']}]['label'];
   }
   else {
-    $type = $child->entity_type;
+    $type = $referring_entity->entity_type;
     $type_name = $entity_info['label'];
   }
   $field = field_info_field($field_name);
-  $field_instance = field_info_instance($child->entity_type, $field_name, $type);
+  $field_instance = field_info_instance($referring_entity->entity_type, $field_name, $type);
   $required = $field_instance['required'] ? ' <span class="form-required" title="' .
           t('This field is required.') . '">*</span>' : '';
   $reference = t('a field!required in a content item', array('!required' => $required));
-  $has_required[$child->revision] |= $field_instance['required'];
-  $has_edit_permissions &= entity_access('update', $child->entity_type, $child_entity) &&
-          field_access('update', $field, $child->entity_type, $child_entity);
-  if ( entity_access('view', $child->entity_type, $child_entity) &&
-          field_access('view', $field, $child->entity_type, $child_entity) ) {
-    $uri = entity_uri($child->entity_type, $child_entity);
-    if ( !($name = entity_label($child->entity_type, $child_entity)) ) {
-      $name = t('with id @id', array('@id' => $child->entity_id));
+  $has_required[$referring_entity->revision] |= $field_instance['required'];
+  $has_edit_permissions &= entity_access('update', $referring_entity->entity_type, $entity) &&
+          field_access('update', $field, $referring_entity->entity_type, $entity);
+  if ( entity_access('view', $referring_entity->entity_type, $entity) &&
+          field_access('view', $field, $referring_entity->entity_type, $entity) ) {
+    $uri = entity_uri($referring_entity->entity_type, $entity);
+    if ( !($name = entity_label($referring_entity->entity_type, $entity)) ) {
+      $name = t('with id @id', array('@id' => $referring_entity->entity_id));
     }
     $reference = t('field %field!required in !revision @type !name', array(
       '%field' => $field_instance['label'],
       '!required' => $required,
-      '!revision' => $child->revision == 'revision'
-            ? ( !empty($child->revision_timestamp)
-              ? t('the !ts revision of', array('!ts' => format_date($child->revision_timestamp)))
+      '!revision' => $referring_entity->revision == 'revision'
+            ? ( !empty($referring_entity->revision_timestamp)
+              ? t('the !ts revision of', array('!ts' => format_date($referring_entity->revision_timestamp)))
               : t('a previous revision of') )
             : '',
       '@type' => strtolower($type_name),

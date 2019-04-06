@@ -1,17 +1,17 @@
 Entity Reference Referential Integrity
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This module solves the problem of deleting parent entities (nodes, taxonomy
-terms, users, etc.) that are referred to by other entities through taxonomy term
+This module solves the problem of deleting entities (nodes, taxonomy terms,
+users, etc.) that are referred to by other entities through taxonomy term
 reference or entity reference fields (see
 https://www.drupal.org/project/entityreference/issues/1368386, for example).
-Drupal will not prevent a user from deleting such 'parent entities', but this
+Drupal will not prevent a user from deleting such 'target entities', but this
 module will, provided some kind of delete confirmation form is used. It hooks
 into various entity delete confirmation forms, and does a check of the entity or
 entities about to be deleted as to whether or not they are referred to by any
-other entities, and if so, shows the referrers (the child entities) to the user
-if the current user has view permissions on the referring entities and fields,
-or if not, just that there is referring content, and either
+other entities, and if so, shows the referring entities to the user if the
+current user has view permissions on the referring entities and fields, or if
+not, just that there is referring content, and either
 
 1.  disables the delete button on the form if any of the referring fields are
     required and the user does not have permissions to bypass required field
@@ -71,24 +71,24 @@ hook_erri_reference_fields() will allow your module to leverage this module's
 integrity checking. Such fields must be created through the field API, as this
 module relies on other aspects of the Field API to do its work.
 
-A module can implement hook_erri_reference_check() to add referring / child
-things to the list of dependants if the module does not use the field API to
-store its data, but still wants to hook into the reference checking.  In this
-case, your hook is passed the parent entity type, id, and bundle where there is
-a bundle, and you're responsible for doing your own reference checking in the
-hook, and if there are references, passing back an appropriately structured
-array of references.  See erri.api.php for details.
+A module can implement hook_erri_reference_check() to add referring things to
+the list of dependants if the module does not use the field API to store its
+data, but still wants to hook into the reference checking.  In this case, your
+hook is passed the target entity type, id, and bundle where there is a bundle,
+and you're responsible for doing your own reference checking in the hook, and if
+there are references, passing back an appropriately structured array of
+references.  See erri.api.php for details.
 
-A module can call the function erri_get_child_entities, passing it the specified
-parameters, to get a two-level array of child entities for a particular parent,
-keyed on the field referencing the parent, and then act accordingly. For
-example:
+A module can call the function erri_get_referring_entities, passing it the
+specified parameters, to get a two-level array of referring entities for a
+particular target, keyed on the field referencing the target, and then act
+accordingly. For example:
 
-    $fields = erri_get_child_entities('node', $parent->nid, 'customer');
+    $fields = erri_get_referring_entities('node', $target->nid, 'customer');
     if ( !empty($fields) ) {
-      foreach ( $fields as $field_name => $children ) {
-        // $children is an array with each element an array of entity_type,
-        // bundle, entity_id, etc. that all point to node $parent through field
+      foreach ( $fields as $field_name => $referring ) {
+        // $referring is an array with each element an array of entity_type,
+        // bundle, entity_id, etc. that all point to node $target through field
         // $field_name.
         ...
       }
