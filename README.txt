@@ -20,7 +20,7 @@ not, just that there is referring content, and either
     permissions on either the referring entities or referring fields, or
 2.  where the referring fields are all optional and the current user has
     permissions to update both the referring entities and the referring field on
-    those entities or has permissions to either bypass required contraints or
+    those entities or has permissions to either bypass required constraints or
     can mass-change targets, changes the text of the delete button to indicate
     all referring fields will be set to empty or changed to a new target.
 
@@ -72,7 +72,7 @@ integrity checking. Such fields must be created through the field API, as this
 module relies on other aspects of the Field API to do its work.
 
 A module can implement hook_erri_reference_check() to add referring things to
-the list of dependants if the module does not use the field API to store its
+the list of dependents if the module does not use the field API to store its
 data, but still wants to hook into the reference checking.  In this case, your
 hook is passed the target entity type, id, and bundle where there is a bundle,
 and you're responsible for doing your own reference checking in the hook, and if
