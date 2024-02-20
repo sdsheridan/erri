@@ -1,17 +1,17 @@
 Entity Reference Referential Integrity
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+======================================
 
 This module solves the problem of deleting entities (nodes, taxonomy terms,
 users, etc.) that are referred to by other entities through taxonomy term
 reference or entity reference fields (see
 https://www.drupal.org/project/entityreference/issues/1368386, for example).
-Drupal will not prevent a user from deleting such 'target entities', but this
-module will, provided some kind of delete confirmation form is used. It hooks
-into various entity delete confirmation forms, and does a check of the entity or
-entities about to be deleted as to whether or not they are referred to by any
-other entities, and if so, shows the referring entities to the user if the
-current user has view permissions on the referring entities and fields, or if
-not, just that there is referring content, and either
+Backdrop (and Drupal) will not prevent a user from deleting such 'target
+entities', but this module will, provided some kind of delete confirmation form
+is used. It hooks into various entity delete confirmation forms, and does a
+check of the entity or entities about to be deleted as to whether or not they
+are referred to by any other entities, and if so, shows the referring entities
+to the user if the current user has view permissions on the referring entities
+and fields, or if not, just that there is referring content, and either
 
 1.  disables the delete button on the form if any of the referring fields are
     required and the user does not have permissions to bypass required field
@@ -35,8 +35,21 @@ permissions to bypass required constraints, and a mass-target-change upon delete
 if the user has permissions.  'Cascade' is not (yet) implemented.  Changes are
 recorded and can be seen in the "Recent Log Messages" report.
 
+
+Installation
+------------
+
+- Install this module using the official Backdrop CMS instructions at
+  https://docs.backdropcms.org/documentation/extend-with-modules.
+  The module will begin working immediately once activated.
+
+- Grant permissions as required to trusted roles if there is a need to bypass
+  required field constraints, or to allow certain users to make mass changes to
+  targets upon deleting entities.
+
+
 Permissions
-~~~~~~~~~~~
+-----------
 
 The module has three special permissions, set as normal in the normal
 Permissions form.  One is to bypass the required constraints for revisions, so
@@ -46,17 +59,18 @@ versions of content.  The third permission allows users to select a new target
 for referring fields to point to when an entity is deleted.  These permissions
 should be granted only to trusted roles.
 
+
 API
-~~~
+---
 
 The module already handles node, taxonomy term, and user delete forms, both
 single and multi-versions (including Taxonomy Manager's delete), and has an API
-hook hook_erri_info() for other modules that use the Drupal confirm_form()
+hook hook_erri_info() for other modules that use the Backdrop confirm_form()
 function to create their delete forms, or at least have elements either
 identical to or like the ['description']['#markup'] form element and the
 ['actions']['submit'] button used for the delete (see
-https://api.drupal.org/api/drupal/modules%21system%21system.module/funct...). If
-your module's custom delete confirmation form does not have those elements
+https://docs.backdropcms.org/api/backdrop/core%21modules%21system%21system.module/function/confirm_form/1 ).
+If your module's custom delete confirmation form does not have those elements
 identical to those supplied by confirm_form(), you can specify equivalent
 elements in hook_erri_info(). Note that the description element must be one that
 permits the concatenation of text, and the submit element must be of #type
@@ -95,9 +109,28 @@ accordingly. For example:
     }
 
 
-Installation
-~~~~~~~~~~~~
-Install this module like any other, and activate it.  The module will begin
-working immediately.  Grant permissions as required to trusted roles if there is
-a need to bypass required field constraints, or to allow certain users to make
-mass changes to targets upon deleting entities.
+Issues
+------
+
+Bugs and feature requests should be reported in [the Issue Queue](https://github.com/backdrop-contrib/erri/issues).
+
+
+Current Maintainers
+-------------------
+
+- [Shawn Sheridan](https://github.com/sdsheridan).
+- Seeking additional maintainers.
+
+
+Credits
+-------
+
+- Ported to Backdrop CMS by [Shawn Sheridan](https://github.com/sdsheridan).
+- Originally written for Drupal by [Shawn Sheridan](https://github.com/sdsheridan).
+
+
+License
+-------
+
+This project is GPL v2 software.
+See the LICENSE.txt file in this directory for complete text.

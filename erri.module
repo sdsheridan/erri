@@ -83,13 +83,13 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         $form['erri_target_info'] = array(
           '#type' => 'value',
           '#value' => array($id => array(
-            'entity' => $target_entity,
-            'id' => $id,
-            'type' => $delete_form['target_type'],
-            'bundle' => $bundle,
-            'title' => $title,
-            'fields' => array_keys($referring_entities),
-          ),),
+              'entity' => $target_entity,
+              'id' => $id,
+              'type' => $delete_form['target_type'],
+              'bundle' => $bundle,
+              'title' => $title,
+              'fields' => array_keys($referring_entities),
+            )),
         );
       }
       // If 'entities' is specified, then this is a multi-entity delete form.
@@ -99,7 +99,10 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         // Get the entities from the form.
         $target_entities = $delete_form['entities']($form_copy, $form_state_copy);
         $target_entity_ids = element_children($target_entities);
-        $form['erri_target_info'] = array('#type' => 'value', '#value' => array());
+        $form['erri_target_info'] = array(
+          '#type' => 'value',
+          '#value' => array(),
+        );
         foreach ( $target_entity_ids as $id ) {
           // Get the full entity via the entity's load function.
           $target_entity = $target_entity_info['load hook']($id);
@@ -167,9 +170,16 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         // permissions.  Then evaluate field-by-field and for each referenced entity,
         // and change accordingly (done in the called functions, so vars passed by
         // reference).
-        $has_required = array('current' => FALSE, 'revision' => FALSE);
+        $has_required = array(
+          'current' => FALSE,
+          'revision' => FALSE,
+        );
         $has_edit_permissions = TRUE;
-        $description_additions = array('top' => '', 'list' => '', 'bottom' => '');
+        $description_additions = array(
+          'top' => '',
+          'list' => '',
+          'bottom' => '',
+        );
         if ( $single_item ) {
           $list = _erri_list_referring_entities($referring_entities, $has_required, $has_edit_permissions);
         }
@@ -189,19 +199,19 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
 
         // Assemble final messages and determine if the delete button should be disabled.
         switch ( TRUE ) {
-          case !$has_edit_permissions :
+          case !$has_edit_permissions:
             $description_additions['bottom'] = '<p>' .
                     t('You do not have sufficient permissions on all referring items and / or fields to be able to delete this entity.') .
                     '</p>';
-          case $has_required['current'] && !user_access('erri:bypass_current') && !user_access('erri:change_reference_target') :
-          case $has_required['revision'] && !user_access('erri:bypass_revisions') && !user_access('erri:change_reference_target') :
+          case $has_required['current'] && !user_access('erri:bypass_current') && !user_access('erri:change_reference_target'):
+          case $has_required['revision'] && !user_access('erri:bypass_revisions') && !user_access('erri:change_reference_target'):
             if ( $single_item ) {
               $description_additions['top'] = t('%title cannot be deleted because it is referenced by:', array('%title' => $title));
-              drupal_set_title(t('Cannot delete %title', array('%title' => $title)), PASS_THROUGH);
+              backdrop_set_title(t('Cannot delete %title', array('%title' => $title)), PASS_THROUGH);
             }
             else {
               $description_additions['top'] = t('One or more of the @title cannot be deleted because:', array('@title' => $title));
-              drupal_set_title(t('Cannot delete one or more of the @title', array('@title' => $title)));
+              backdrop_set_title(t('Cannot delete one or more of the @title', array('@title' => $title)));
             }
             $submit_element['#disabled'] = TRUE;
             break;
@@ -210,7 +220,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
           // and there are no 'required' fields referencing the entity / entities to be deleted, or
           // there are, but the user either has required bypass permission(s) or they have permission to mass-change the
           // reference target to something else.
-          case user_access('erri:change_reference_target') :
+          case user_access('erri:change_reference_target'):
             // User has permission to make a mass-change, so if there is a function
             // to determine replacement candidates...
             if ( !empty($delete_form['candidates']) && function_exists($delete_form['candidates']) ) {
@@ -286,7 +296,7 @@ function erri_form_alter(&$form, &$form_state, $form_id) {
         }
         $description_element = ( empty($submit_element['#disabled']) ? $description_element : '' ) . '<div class="erri">' .
                 implode('', $description_additions) . '</div>';
-        $form['#attached']['css'][] = drupal_get_path('module', 'erri') . '/erri.css';
+        $form['#attached']['css'][] = backdrop_get_path('module', 'erri') . '/erri.css';
       }
     }
   }
@@ -313,7 +323,10 @@ function erri_new_target_validate($element, &$form_state) {
  */
 function erri_delete_form_submit($form, &$form_state) {
   $reference_fields = erri_get_reference_fields();
-  $fields_change_count = array('FIELD_LOAD_CURRENT' => 0, 'FIELD_LOAD_REVISION' => 0);
+  $fields_change_count = array(
+    'FIELD_LOAD_CURRENT' => 0,
+    'FIELD_LOAD_REVISION' => 0,
+  );
   $changed_items = array();
   $replacement = !empty($form_state['values']['erri_new_target']) ? $form_state['values']['erri_new_target'] : FALSE;
   foreach ( $form_state['values']['erri_target_info'] as $entity_id => $entity_info ) {
@@ -372,27 +385,14 @@ function erri_delete_form_submit($form, &$form_state) {
       }
     }
   }
-  drupal_flush_all_caches();
-  drupal_set_message(format_plural(max($fields_change_count) + $other_changes_count, 'One reference !action.', '@count references !action.',
+  backdrop_flush_all_caches();
+  backdrop_set_message(format_plural(max($fields_change_count) + $other_changes_count, 'One reference !action.', '@count references !action.',
           array('!action' => $replacement ? t('changed') : t('emptied'))));
   watchdog('erri', '!count field reference !andother targets altered: !list', array(
     '!count' => array_sum($fields_change_count) + $other_changes_count,
     '!andother' => $other_changes_count > 0 ? t('and other module reference') : '',
     '!list' => '<ol><li>' . implode('</li><li>', $changed_items) . '</li></ol>',
   ));
-}
-
-/**
- * Assemble all child (referring) entities of a parent (target) entity for referential integrity check.
- * @deprecated since version 1.6  - use erri_get_referring_entities instead.
- * @param string $parent_entity_type The entity_type of the parent entity (eg., 'node', 'user', 'taxonomy_term', etc.).
- * @param int $id The ID of the parent entity.
- * @param string $bundle The bundle of the parent in the case that the parent entity type uses bundles.
- * @return array Child entities referring to the parent, keyed on the referencing field with sub-arrays of the
- *   entities referencing, or an empty array if no entities refer to the parent.
- */
-function erri_get_child_entities($parent_entity_type, $id, $bundle = NULL) {
-  return erri_get_referring_entities($parent_entity_type, $id, $bundle);
 }
 
 /**
@@ -573,10 +573,10 @@ function _erri_get_reference($referring_entity, $field_name, &$has_required, &$h
   }
   else {
     watchdog('erri', 'Load function %function does not exist for @type @id.', array(
-        '%function' => $entity_info['load hook'],
-        '@type' => $referring_entity->entity_type,
-        '@id' => $referring_entity->entity_id,
-      ), WATCHDOG_ERROR);
+      '%function' => $entity_info['load hook'],
+      '@type' => $referring_entity->entity_type,
+      '@id' => $referring_entity->entity_id,
+    ), WATCHDOG_ERROR);
     $has_required['current'] = TRUE; // Just set this as a default.
     $has_required['revision'] = TRUE;
     $has_edit_permissions = FALSE;

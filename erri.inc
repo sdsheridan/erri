@@ -83,21 +83,21 @@ function _erri_get_candidates($entity_type, $bundle, $exclude_ids) {
   $query = new EntityFieldQuery();
   $query->entityCondition('entity_type', $entity_type);
   switch ( $entity_type ) {
-    case 'node' :
+    case 'node':
       $query->entityCondition('bundle', $bundle)
               ->propertyCondition('nid', $exclude_ids, 'NOT IN')
               ->propertyCondition('status', 1)
               ->propertyOrderBy('title');
       $item_id = 'nid';
       break;
-    case 'taxonomy_term' :
+    case 'taxonomy_term':
       $vocab = taxonomy_vocabulary_machine_name_load($bundle);
       $query->propertyCondition('vid', $vocab->vid)
               ->propertyCondition('tid', $exclude_ids, 'NOT IN')
               ->propertyOrderBy('weight');
       $item_id = 'tid';
       break;
-    case 'user' :
+    case 'user':
       $query->propertyCondition('uid', $exclude_ids, 'NOT IN')
               ->propertyOrderBy('name');
       $item_id = 'uid';
